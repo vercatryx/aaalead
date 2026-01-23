@@ -1,0 +1,127 @@
+[
+  {
+    "name": "BHI Registration Number",
+    "type": "Text",
+    "id": "BHI Registration Number"
+  },
+  {
+    "name": "Facility ID",
+    "type": "Text",
+    "id": "Facility ID"
+  },
+  {
+    "name": "Site Address",
+    "type": "Text",
+    "id": "Site Address"
+  },
+  {
+    "name": "County",
+    "type": "Text",
+    "id": "County"
+  },
+  {
+    "name": "Block",
+    "type": "Text",
+    "id": "Block"
+  },
+  {
+    "name": "Lot",
+    "type": "Text",
+    "id": "Lot"
+  },
+  {
+    "name": "Applicable Units or Common Areas 1",
+    "type": "Text",
+    "id": "Applicable Units or Common Areas 1"
+  },
+  {
+    "name": "Applicable Units or Common Areas 2",
+    "type": "Text",
+    "id": "Applicable Units or Common Areas 2"
+  },
+  {
+    "name": "Name of Inspector  Risk Assessor",
+    "type": "Text",
+    "id": "Name of Inspector  Risk Assessor"
+  },
+  {
+    "name": "NJDOH ID",
+    "type": "Text",
+    "id": "NJDOH ID"
+  },
+  {
+    "name": "Name of Evaluation Contractor",
+    "type": "Text",
+    "id": "Name of Evaluation Contractor"
+  },
+  {
+    "name": "NJDCA CERT",
+    "type": "Text",
+    "id": "NJDCA CERT"
+  },
+  {
+    "name": "Address of Evaluation Contractor",
+    "type": "Text",
+    "id": "Address of Evaluation Contractor"
+  },
+  {
+    "name": "Phone",
+    "type": "Text",
+    "id": "Phone"
+  },
+  {
+    "name": "Dates of Inspection",
+    "type": "Text",
+    "id": "Dates of Inspection"
+  },
+  {
+    "name": "undefined",
+    "type": "Text",
+    "id": "undefined"
+  },
+  {
+    "name": "undefined_2",
+    "type": "Text",
+    "id": "undefined_2"
+  },
+  {
+    "name": "TO",
+    "type": "Text",
+    "id": "TO"
+  },
+  {
+    "name": "undefined_3",
+    "type": "Text",
+    "id": "undefined_3"
+  },
+  {
+    "name": "undefined_4",
+    "type": "Text",
+    "id": "undefined_4"
+  },
+  {
+    "name": "Date Certificate Issued",
+    "type": "Text",
+    "id": "Date Certificate Issued"
+  },
+  {
+    "name": "undefined_5",
+    "type": "Text",
+    "id": "undefined_5"
+  },
+  {
+    "name": "Signature of Inspector  Risk Assessor",
+    "type": "Signature",
+    "id": "Signature of Inspector  Risk Assessor"
+  },
+  {
+    "name": "undefined_6a",
+    "type": "Text",
+    "id": "undefined_6a"
+  },
+  {
+    "name": "Check Box8",
+    "type": "CheckBox",
+    "id": "Check Box8"
+  }
+]

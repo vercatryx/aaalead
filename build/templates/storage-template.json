@@ -1,0 +1,100 @@
+{
+  "inspectors": [
+    {
+      "id": "inspector-1",
+      "name": "John Doe",
+      "variableValues": [
+        ["License Number", "12345"],
+        ["Phone", "555-1234"]
+      ]
+    },
+    {
+      "id": "inspector-2",
+      "name": "Jane Smith",
+      "variableValues": [
+        ["License Number", "67890"],
+        ["Phone", "555-5678"]
+      ]
+    }
+  ],
+  "generalDocumentTypes": [
+    "Certificate",
+    "Report Template"
+  ],
+  "inspectorDocumentTypes": [
+    "License",
+    "Signature"
+  ],
+  "generalVariables": [
+    ["Company Name", "Your Company"],
+    ["Address", "123 Main St"],
+    ["Phone", "555-0000"],
+    ["Email", "info@company.com"]
+  ],
+  "inspectorVariableNames": [
+    "License Number",
+    "Phone",
+    "Email",
+    "Certification Date"
+  ],
+  "generalTypedDocuments": {
+    "Certificate": {
+      "id": "doc-general-cert-1",
+      "fileName": "certificate-template.pdf",
+      "uploadedAt": "2024-01-01T00:00:00.000Z",
+      "category": "general-typed",
+      "documentType": "Certificate",
+      "filePath": "certificate-template.pdf"
+    },
+    "Report Template": {
+      "id": "doc-general-report-1",
+      "fileName": "report-template.pdf",
+      "uploadedAt": "2024-01-01T00:00:00.000Z",
+      "category": "general-typed",
+      "documentType": "Report Template",
+      "filePath": "report-template.pdf"
+    }
+  },
+  "inspectorDocuments": {
+    "inspector-1": [
+      {
+        "id": "doc-inspector-1-license",
+        "fileName": "john-doe-license.pdf",
+        "uploadedAt": "2024-01-01T00:00:00.000Z",
+        "category": "inspector",
+        "inspectorId": "inspector-1",
+        "documentType": "License",
+        "filePath": "john-doe-license.pdf"
+      },
+      {
+        "id": "doc-inspector-1-signature",
+        "fileName": "john-doe-signature.pdf",
+        "uploadedAt": "2024-01-01T00:00:00.000Z",
+        "category": "inspector",
+        "inspectorId": "inspector-1",
+        "documentType": "Signature",
+        "filePath": "john-doe-signature.pdf"
+      }
+    ],
+    "inspector-2": [
+      {
+        "id": "doc-inspector-2-license",
+        "fileName": "jane-smith-license.pdf",
+        "uploadedAt": "2024-01-01T00:00:00.000Z",
+        "category": "inspector",
+        "inspectorId": "inspector-2",
+        "documentType": "License",
+        "filePath": "jane-smith-license.pdf"
+      },
+      {
+        "id": "doc-inspector-2-signature",
+        "fileName": "jane-smith-signature.pdf",
+        "uploadedAt": "2024-01-01T00:00:00.000Z",
+        "category": "inspector",
+        "inspectorId": "inspector-2",
+        "documentType": "Signature",
+        "filePath": "jane-smith-signature.pdf"
+      }
+    ]
+  }
+}
