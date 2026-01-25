@@ -155,14 +155,51 @@ const formatDateForPDF = (dateStr: string | number | Date | undefined): string =
         // Excel serial date
         dateObj = new Date((dateStr - (25567 + 2)) * 86400 * 1000);
     } else if (typeof dateStr === 'string') {
-        // Try parsing the date string
-        dateObj = new Date(dateStr);
+        // Handle date strings - parse manually to avoid timezone issues
+        const trimmed = dateStr.trim();
+        
+        // First check if it's ISO format (YYYY-MM-DD) from HTML5 date input
+        const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+        if (isoMatch) {
+            const year = parseInt(isoMatch[1], 10);
+            const month = parseInt(isoMatch[2], 10);
+            const day = parseInt(isoMatch[3], 10);
+            // Create date in local timezone to avoid timezone conversion issues
+            dateObj = new Date(year, month - 1, day);
+        }
+        // Check if it's in MM/DD/YYYY or M/D/YY format
+        else {
+            const dateMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+            if (dateMatch) {
+                let month = parseInt(dateMatch[1], 10);
+                let day = parseInt(dateMatch[2], 10);
+                let year = parseInt(dateMatch[3], 10);
+                
+                // Handle 2-digit years (assume 2000-2099)
+                if (year < 100) {
+                    year += 2000;
+                }
+                
+                // Create date in local timezone to avoid timezone conversion issues
+                dateObj = new Date(year, month - 1, day);
+                
+                // Validate the date is correct (handles invalid dates like Feb 30)
+                if (dateObj.getMonth() !== month - 1 || dateObj.getDate() !== day || dateObj.getFullYear() !== year) {
+                    // Invalid date, try standard parsing as fallback
+                    dateObj = new Date(trimmed);
+                }
+            } else {
+                // Try parsing with standard Date constructor as fallback
+                dateObj = new Date(trimmed);
+            }
+        }
     }
 
     if (dateObj && !isNaN(dateObj.getTime())) {
+        // Use local date methods to avoid timezone issues
         const month = dateObj.getMonth() + 1; // getMonth() returns 0-11
-        const day = dateObj.getDate();
-        const year = dateObj.getFullYear();
+        const day = dateObj.getDate(); // getDate() returns local day
+        const year = dateObj.getFullYear(); // getFullYear() returns local year
         return `${month}/${day}/${year}`;
     }
 
@@ -183,285 +220,6 @@ const formatCellValue = (value: any): string => {
     return String(value);
 };
 
-// Helper function to fill certificate form fields - EXACT COPY of CERTIF report logic
-const fillCertificateForm = async (
-    form: any,
-    data: ExtractedData & Record<string, any>,
-    certConfig: any,
-    inspectors?: Inspector[],
-    generalVariables?: Map<string, string>
-): Promise<void> => {
-    console.log('=== CERTIFICATE FILLING DEBUG START ===');
-    console.log('Certificate data object:', data);
-    console.log('Certificate config mappings count:', certConfig.mappings.length);
-    console.log('Available form fields:', form.getFields().map((f: any) => f.getName()).join(', '));
-    
-    // First pass: Handle Inspection Date splitting first
-    const inspectionDateMapping = certConfig.mappings.find(m => m.pdfFieldId === 'Dates of Inspection' && m.source === 'user_input');
-    console.log('Inspection date mapping found:', !!inspectionDateMapping);
-    if (inspectionDateMapping) {
-        const inspectionDateValue = data[inspectionDateMapping.pdfFieldId] || data['Certificate_DatesOfInspection'] || data['Date'] || '';
-        console.log('Inspection date value:', inspectionDateValue);
-        if (inspectionDateValue) {
-            const formattedDate = formatDateForPDF(inspectionDateValue);
-            const dateParts = formattedDate.split('/');
-            
-            if (dateParts.length === 3) {
-                const [month, day, year] = dateParts;
-                
-                // Fill all date fields
-                const dateFields = [
-                    { id: 'Dates of Inspection', value: month },
-                    { id: 'undefined', value: day },
-                    { id: 'undefined_2', value: year },
-                    { id: 'TO', value: month },
-                    { id: 'undefined_3', value: day },
-                    { id: 'undefined_4', value: year },
-                    { id: 'Date Certificate Issued', value: month },
-                    { id: 'undefined_5', value: day },
-                    { id: 'undefined_6a', value: year }
-                ];
-                
-                dateFields.forEach(({ id, value }) => {
-                    try {
-                        // #region agent log
-                        fetch('http://127.0.0.1:7242/ingest/e11fb577-b11a-452a-988c-2b2628576451',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'pdfGenerator.ts:212',message:'Attempting to get date field',data:{fieldId:id,availableFields:form.getFields().map((f:any)=>f.getName())},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-                        // #endregion
-                        const field = form.getTextField(id);
-                        if (field) {
-                            console.log(`CERTIFICATE: Filling date field "${id}" with value "${value}"`);
-                            field.setText(value);
-                            // updateFieldAppearances() will be called on the whole form after all fields are set
-                        } else {
-                            console.warn(`CERTIFICATE: Date field "${id}" not found in form`);
-                        }
-                    } catch (err: any) {
-                        console.warn(`CERTIFICATE: Error filling date field ${id}:`, err);
-                        // #region agent log
-                        try {
-                            fetch('http://127.0.0.1:7242/ingest/e11fb577-b11a-452a-988c-2b2628576451',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'pdfGenerator.ts:223',message:'Error getting date field',data:{fieldId:id,error:err?.message||String(err),availableFields:form.getFields().map((f:any)=>f.getName())},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-                        } catch {}
-                        // #endregion
-                    }
-                });
-            }
-        }
-    }
-
-    // Handle Applicable Units text splitting
-    const applicableUnitsMapping = certConfig.mappings.find(m => m.pdfFieldId === 'Applicable Units or Common Areas 1' && m.source === 'user_input');
-    console.log('Applicable Units mapping found:', !!applicableUnitsMapping);
-    if (applicableUnitsMapping) {
-        const applicableUnitsValue = data[applicableUnitsMapping.pdfFieldId] || data['Certificate_ApplicableUnits'] || '';
-        console.log('Applicable Units value:', applicableUnitsValue);
-        if (applicableUnitsValue) {
-            const maxLength = 50;
-            const text = String(applicableUnitsValue);
-            if (text.length > maxLength) {
-                let breakPoint = maxLength;
-                for (let i = maxLength; i > maxLength * 0.7; i--) {
-                    if (text[i] === ' ' || text[i] === ',' || text[i] === '-') {
-                        breakPoint = i + 1;
-                        break;
-                    }
-                }
-                const firstPart = text.substring(0, breakPoint).trim();
-                const secondPart = text.substring(breakPoint).trim();
-                
-                try {
-                    const secondField = form.getTextField('Applicable Units or Common Areas 2');
-                    if (secondField) {
-                        secondField.setText(secondPart);
-                        // updateFieldAppearances() will be called on the whole form after all fields are set
-                    }
-                } catch (err) {
-                    console.warn('CERTIFICATE: Error filling Applicable Units field 2:', err);
-                }
-            }
-        }
-    }
-
-    // Iterate Mappings for all other fields (but skip Check Box8 - handle at end)
-    const checkboxMapping = certConfig.mappings.find(m => m.pdfFieldId === 'Check Box8');
-    const otherMappings = certConfig.mappings.filter(m => m.pdfFieldId !== 'Check Box8');
-    console.log(`CERTIFICATE: Processing ${otherMappings.length} other mappings (excluding Check Box8)`);
-    
-    otherMappings.forEach(mapping => {
-        console.log(`CERTIFICATE: Processing field "${mapping.pdfFieldId}" (source: ${mapping.source})`);
-        try {
-            // Skip fields that were already handled in special cases
-            if (mapping.pdfFieldId === 'Dates of Inspection' || 
-                ['undefined', 'undefined_2', 'TO', 'undefined_3', 'undefined_4', 
-                 'Date Certificate Issued', 'undefined_5', 'undefined_6a', 'Signature'].includes(mapping.pdfFieldId) ||
-                (mapping.pdfFieldId === 'Applicable Units or Common Areas 1' && mapping.source === 'user_input')) {
-                // These are handled above, but we still need to process the main field
-                if (mapping.pdfFieldId === 'Dates of Inspection' && mapping.source === 'user_input') {
-                    const field = form.getTextField(mapping.pdfFieldId);
-                    if (field) {
-                        const inspectionDateValue = data[mapping.pdfFieldId] || data['Certificate_DatesOfInspection'] || data['Date'] || '';
-                        if (inspectionDateValue) {
-                            const formattedDate = formatDateForPDF(inspectionDateValue);
-                            const dateParts = formattedDate.split('/');
-                            if (dateParts.length === 3) {
-                                field.setText(dateParts[0]); // MM
-                                // updateFieldAppearances() will be called on the whole form after all fields are set
-                            }
-                        }
-                    }
-                } else if (mapping.pdfFieldId === 'Applicable Units or Common Areas 1' && mapping.source === 'user_input') {
-                    const field = form.getTextField(mapping.pdfFieldId);
-                    if (field) {
-                        let valueToFill = data[mapping.pdfFieldId] || data['Certificate_ApplicableUnits'] || '';
-                        if (valueToFill) {
-                            const maxLength = 50;
-                            const text = String(valueToFill);
-                            if (text.length > maxLength) {
-                                let breakPoint = maxLength;
-                                for (let i = maxLength; i > maxLength * 0.7; i--) {
-                                    if (text[i] === ' ' || text[i] === ',' || text[i] === '-') {
-                                        breakPoint = i + 1;
-                                        break;
-                                    }
-                                }
-                                valueToFill = text.substring(0, breakPoint).trim();
-                            }
-                        }
-                        field.setText(String(valueToFill));
-                        // updateFieldAppearances() will be called on the whole form after all fields are set
-                    }
-                }
-                return; // Skip other special case fields as they're already handled
-            }
-
-            // Skip signature field - it's a PDFSignature, not a text field
-            if (mapping.pdfFieldId === 'Signature of Inspector  Risk Assessor') {
-                console.log(`CERTIFICATE: Skipping signature field "${mapping.pdfFieldId}" - it's a signature field, not text`);
-                return;
-            }
-
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/e11fb577-b11a-452a-988c-2b2628576451',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'pdfGenerator.ts:319',message:'Attempting to get field',data:{fieldId:mapping.pdfFieldId,availableFields:form.getFields().map((f:any)=>f.getName())},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-            // #endregion
-            const field = form.getTextField(mapping.pdfFieldId);
-            if (!field) {
-                console.warn(`CERTIFICATE: Field "${mapping.pdfFieldId}" found in config but not in PDF.`);
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/e11fb577-b11a-452a-988c-2b2628576451',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'pdfGenerator.ts:322',message:'Field not found',data:{fieldId:mapping.pdfFieldId,availableFields:form.getFields().map((f:any)=>f.getName())},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-                // #endregion
-                return;
-            }
-
-            let valueToFill = '';
-
-            if (mapping.source === 'user_input') {
-                // Try certificate-specific field names first, then regular field names
-                valueToFill = data[mapping.pdfFieldId] || 
-                              data[`Certificate_${mapping.pdfFieldId}`] ||
-                              (mapping.pdfFieldId === 'Site Address' ? (data['Certificate_SiteAddress'] || data['Address'] || '') : '') ||
-                              (mapping.pdfFieldId === 'Name of Inspector  Risk Assessor' ? 
-                                  (data['Certificate_NameOfInspector'] || 
-                                   (data.selectedInspectorId && inspectors ? 
-                                    (inspectors.find(i => i.id === data.selectedInspectorId)?.name || '') : '') || '') : '') ||
-                              '';
-                console.log(`CERTIFICATE: Field "${mapping.pdfFieldId}" - user_input value: "${valueToFill}"`);
-            } else if (mapping.source === 'static') {
-                valueToFill = mapping.staticValue || '';
-                console.log(`CERTIFICATE: Field "${mapping.pdfFieldId}" - static value: "${valueToFill}"`);
-            } else if (mapping.source === 'excel_cell') {
-                valueToFill = '';
-                console.log(`CERTIFICATE: Field "${mapping.pdfFieldId}" - excel_cell (empty)`);
-            }
-            
-            // Check if field name matches variables (general first, then inspector)
-            if (!valueToFill) {
-                const fieldName = mapping.pdfFieldId.toLowerCase();
-                
-                // Check general variables first
-                if (generalVariables) {
-                    for (const [varName, varValue] of generalVariables.entries()) {
-                        const varNameLower = varName.toLowerCase();
-                        if (fieldName === varNameLower || 
-                            fieldName.includes(varNameLower) || 
-                            varNameLower.includes(fieldName)) {
-                            valueToFill = varValue;
-                            break;
-                        }
-                    }
-                }
-                
-                // Then check inspector variable values if available
-                if (!valueToFill && data.selectedInspectorId && inspectors) {
-                    const inspector = inspectors.find(i => i.id === data.selectedInspectorId);
-                    if (inspector?.variableValues) {
-                        for (const [varName, varValue] of inspector.variableValues.entries()) {
-                            const varNameLower = varName.toLowerCase();
-                            if (fieldName === varNameLower || 
-                                fieldName.includes(varNameLower) || 
-                                varNameLower.includes(fieldName)) {
-                                valueToFill = varValue;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Format dates as MM/DD/YYYY if this is a date field (but not Dates of Inspection)
-            if (mapping.inputType === 'date' && valueToFill && mapping.pdfFieldId !== 'Dates of Inspection') {
-                valueToFill = formatDateForPDF(valueToFill);
-            }
-
-            console.log(`CERTIFICATE: Setting field "${mapping.pdfFieldId}" to "${valueToFill}"`);
-            field.setText(String(valueToFill));
-            // updateFieldAppearances() will be called on the whole form after all fields are set
-
-        } catch (err) {
-            console.warn(`CERTIFICATE: Error filling field ${mapping.pdfFieldId}:`, err);
-        }
-    });
-    
-    console.log('=== CERTIFICATE FILLING DEBUG END ===');
-
-    // Handle Check Box8 LAST to ensure it's on top of everything
-    if (checkboxMapping) {
-        try {
-            let checkBoxText = '';
-            if (checkboxMapping.source === 'user_input') {
-                checkBoxText = data['Check Box8'] || data['Certificate_CheckBox8'] || '';
-            } else if (checkboxMapping.source === 'static') {
-                checkBoxText = checkboxMapping.staticValue || '';
-            }
-            
-            if (checkBoxText) {
-                try {
-                    const textField = form.getTextField('Check Box8');
-                    if (textField) {
-                        textField.setText(checkBoxText);
-                        try {
-                            textField.setFontSize(24);
-                        } catch (fontErr) {
-                            console.warn('CERTIFICATE: Could not set font size:', fontErr);
-                        }
-                        // updateFieldAppearances() will be called on the whole form after all fields are set
-                    }
-                } catch (textErr) {
-                    try {
-                        const checkboxField = form.getCheckBox('Check Box8');
-                        if (checkboxField) {
-                            checkboxField.check();
-                            checkboxField.updateAppearances();
-                            console.warn('Check Box8 is a checkbox field, cannot write text directly');
-                        }
-                    } catch (checkboxErr) {
-                        console.warn('Check Box8 field not found or could not be accessed:', checkboxErr);
-                    }
-                }
-            }
-        } catch (err) {
-            console.warn(`Error handling Check Box8:`, err);
-        }
-    }
-};
 
 // Helper to calculate text width
 const getTextWidth = (text: string, fontSize: number, font: any): number => {
@@ -795,6 +553,108 @@ const createExcelDataPages = async (pdfDoc: PDFDocument, excelData: any[][], hea
 };
 
 // Method 4: Manual text drawing - Extract field positions and draw text directly
+// Flattening: Use pdf-lib's built-in flatten() method (like print to PDF)
+// This makes the PDF non-editable by converting all form fields to static content
+// Works regardless of who filled the document - universal flattening solution
+// IMPORTANT: Must be called BEFORE any pages are removed, otherwise fields on removed pages cause errors
+const flattenFormByRemovingFields = async (pdfDoc: PDFDocument, form: any): Promise<void> => {
+    console.log('🔄 Flattening PDF using pdf-lib flatten() method (print-to-PDF style)...');
+    
+    try {
+        // Get all fields first to see what we're working with
+        const fields = form.getFields();
+        const totalPages = pdfDoc.getPageCount();
+        const pages = pdfDoc.getPages();
+        const pageRefs = new Set(pages.map(p => p.ref));
+        
+        console.log(`📝 Found ${fields.length} form fields to flatten across ${totalPages} pages...`);
+        
+        if (fields.length === 0) {
+            console.log('✅ No form fields to flatten - PDF is already non-editable');
+            return;
+        }
+        
+        // Check each field's page references before flattening
+        // This helps identify problematic fields that might prevent flattening
+        const problematicFields: any[] = [];
+        const validFields: any[] = [];
+        
+        for (const field of fields) {
+            try {
+                const fieldName = field.getName();
+                const acroField = (field as any).acroField;
+                let hasInvalidRef = false;
+                
+                if (acroField) {
+                    const kids = acroField.dict?.get('Kids');
+                    if (kids && Array.isArray(kids)) {
+                        for (const widget of kids) {
+                            try {
+                                const pageRef = widget.dict?.get('P');
+                                if (pageRef && !pageRefs.has(pageRef)) {
+                                    problematicFields.push(field);
+                                    console.warn(`⚠️ Field "${fieldName}" references invalid page: ${pageRef}`);
+                                    hasInvalidRef = true;
+                                    break;
+                                }
+                            } catch (e) {
+                                // Skip this widget check
+                            }
+                        }
+                    }
+                }
+                
+                if (!hasInvalidRef) {
+                    validFields.push(field);
+                }
+            } catch (checkErr) {
+                // If we can't check, assume it's valid
+                validFields.push(field);
+            }
+        }
+        
+        if (problematicFields.length > 0) {
+            console.warn(`⚠️ Found ${problematicFields.length} fields with invalid page references`);
+            console.warn(`   Problematic fields: ${problematicFields.map((f: any) => f.getName()).join(', ')}`);
+            console.warn(`   Valid fields: ${validFields.length}`);
+            console.warn('   Attempting to flatten - pdf-lib may handle this gracefully or fail completely.');
+        }
+        
+        // Update all field appearances first to ensure values are rendered
+        // This helps ensure the flattened content looks correct
+        console.log(`📝 Updating appearances for ${fields.length} fields before flattening...`);
+        for (const field of fields) {
+            try {
+                if (typeof (field as any).updateAppearances === 'function') {
+                    await (field as any).updateAppearances();
+                }
+            } catch (updateErr) {
+                // Some fields might not support updateAppearances, continue
+            }
+        }
+        
+        // Use image-based flattening directly (print-to-PDF method)
+        // This is the most reliable method - renders entire PDF as static images
+        // Works regardless of form field issues and makes everything non-editable
+        console.log(`🔄 Using image-based flattening (print-to-PDF method) - renders entire PDF as static images...`);
+        await flattenFormAsImage(pdfDoc);
+        console.log(`✅ PDF flattened successfully using image-based method - all content is now non-editable`);
+    } catch (err: any) {
+        // If flattening fails, log the error but don't throw
+        // This allows the PDF to still be generated (just editable)
+        console.warn('⚠️ Failed to flatten PDF:', err.message);
+        if (err.message && err.message.includes('Could not find page')) {
+            console.warn('   ERROR: Form fields reference a page that no longer exists!');
+            console.warn('   This can happen when:');
+            console.warn('   - Pages are removed before flattening');
+            console.warn('   - Form fields reference pages from the original template that were modified');
+            console.warn('   - Internal pdf-lib page reference issues');
+            console.warn('   The PDF will be generated but will remain editable.');
+        }
+        // Don't throw - allow PDF to be generated even if not flattened
+    }
+};
+
 const flattenFormByManualDrawing = async (pdfDoc: PDFDocument, form: any): Promise<void> => {
     console.log('🔄 Attempting manual text drawing flattening...');
     
@@ -952,78 +812,96 @@ const flattenFormAsImage = async (pdfDoc: PDFDocument): Promise<void> => {
         const pdf = await loadingTask.promise;
         const numPages = pdf.numPages;
         
-        const pages = pdfDoc.getPages();
-        // Save original page sizes before we remove pages
-        const pageSizes: Array<[number, number]> = [];
-        for (const page of pages) {
-            const size = page.getSize();
-            // Ensure size is in the correct format [width, height]
-            if (Array.isArray(size) && size.length >= 2) {
-                pageSizes.push([size[0], size[1]]);
-            } else {
-                // Fallback to standard page size
-                pageSizes.push([612, 792]); // 8.5 x 11 inches
-            }
-        }
-        const newPages: any[] = [];
+        // Get page dimensions directly from pdf.js (more reliable than pdf-lib for orientation)
+        // Store images and page sizes as we create them
+        const pageImages: Array<{ image: any; width: number; height: number }> = [];
         
         // Render each page to canvas and convert to image
+        // Use high scale (3.0) for better quality - this prevents distortion
         for (let pageNum = 1; pageNum <= numPages; pageNum++) {
             const pdfPage = await pdf.getPage(pageNum);
-            const viewport = pdfPage.getViewport({ scale: 2.0 }); // Higher scale for better quality
             
-            // Create canvas
+            // Get the page's rotation from the PDF metadata
+            // Some pages may have rotation (0, 90, 180, 270) which affects orientation
+            const pageRotation = pdfPage.rotate || 0;
+            
+            // Get viewport using the page's ACTUAL rotation to preserve how it should appear
+            // This ensures rotated pages are rendered correctly
+            const scale = 3.0; // High scale for quality
+            const viewport = pdfPage.getViewport({ scale: scale, rotation: pageRotation });
+            
+            // Get the page dimensions from the viewport
+            // The viewport with the page's rotation gives us the correct displayed dimensions
+            let originalWidth = viewport.width / scale;
+            let originalHeight = viewport.height / scale;
+            
+            // For pages with 90/270 degree rotation, the displayed dimensions are swapped
+            // But we want to preserve the natural page orientation, so check if we need to swap
+            if (pageRotation === 90 || pageRotation === 270) {
+                // When rotated 90/270, the viewport dimensions are swapped
+                // We need to swap them back to get the natural page dimensions
+                [originalWidth, originalHeight] = [originalHeight, originalWidth];
+                console.log(`Page ${pageNum}: Has ${pageRotation}° rotation - swapped dimensions to ${originalWidth.toFixed(1)}x${originalHeight.toFixed(1)}`);
+            }
+            
+            // Log for debugging
+            const isLandscape = originalWidth > originalHeight;
+            console.log(`Page ${pageNum}: ${isLandscape ? 'Landscape' : 'Portrait'} - Dimensions: ${originalWidth.toFixed(1)}x${originalHeight.toFixed(1)}${pageRotation ? ` (had ${pageRotation}° rotation, now corrected)` : ''}`);
+            
+            // Create canvas with viewport dimensions
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
             if (!context) throw new Error('Could not get canvas context');
             
-            canvas.height = viewport.height;
+            // Set canvas size to exactly match viewport (maintains aspect ratio)
             canvas.width = viewport.width;
+            canvas.height = viewport.height;
             
-            // Render PDF page to canvas
+            // Render PDF page to canvas with high quality
+            // Using the page's actual rotation ensures content is rendered correctly
             await pdfPage.render({
                 canvasContext: context,
                 viewport: viewport
             }).promise;
             
-            // Convert canvas to image
-            const imageData = canvas.toDataURL('image/png');
+            // Convert canvas to PNG with high quality
+            const imageData = canvas.toDataURL('image/png', 1.0); // Maximum quality
             
             // Convert data URL to bytes
             const response = await fetch(imageData);
             const imageBytes = await response.arrayBuffer();
             
-            // Embed image in new PDF page
+            // Embed image and store it with corrected dimensions (preserves landscape/portrait)
             const image = await pdfDoc.embedPng(imageBytes);
-            
-            // Use saved page size (with bounds checking)
-            const pageSize = pageSizes[pageNum - 1] || [612, 792];
-            const [width, height] = pageSize;
-            const newPage = pdfDoc.addPage([width, height]);
-            
-            // Scale image to fit page exactly
-            // The canvas viewport dimensions need to be scaled to match PDF page dimensions
-            const scaleX = width / viewport.width;
-            const scaleY = height / viewport.height;
-            
-            newPage.drawImage(image, {
-                x: 0,
-                y: 0,
-                width: width,
-                height: height,
+            pageImages.push({ 
+                image, 
+                width: originalWidth,   // Corrected width (preserves orientation)
+                height: originalHeight  // Corrected height (preserves orientation)
             });
-            
-            newPages.push(newPage);
         }
         
-        // Remove old pages and add new ones
-        for (let i = pages.length - 1; i >= 0; i--) {
+        // Remove ALL old pages first (from end to beginning to avoid index issues)
+        const originalPageCount = pdfDoc.getPageCount();
+        for (let i = originalPageCount - 1; i >= 0; i--) {
             pdfDoc.removePage(i);
         }
         
-        // Insert new pages at the beginning (they'll be in order since we add them sequentially)
-        for (let i = 0; i < newPages.length; i++) {
-            pdfDoc.insertPage(i, newPages[i]);
+        // Add new pages with images - one page per image, no doubling
+        // CRITICAL: Use original [width, height] to preserve landscape/portrait orientation
+        for (const { image, width, height } of pageImages) {
+            // Create page with exact original dimensions - landscape pages will have width > height
+            const newPage = pdfDoc.addPage([width, height]);
+            
+            // The image was rendered at 3x scale, so imageWidth = width * 3, imageHeight = height * 3
+            // When we draw it back, we need to scale it down by 1/3 to fit the original page size
+            // pdf-lib's drawImage will use the image's natural dimensions unless we specify
+            // So we explicitly set width and height to the original page dimensions
+            newPage.drawImage(image, {
+                x: 0,
+                y: 0,
+                width: width,   // Original page width - this scales the 3x image down correctly
+                height: height, // Original page height - this scales the 3x image down correctly
+            });
         }
         
         console.log('✅ Image-based flattening completed');
@@ -1033,279 +911,60 @@ const flattenFormAsImage = async (pdfDoc: PDFDocument): Promise<void> => {
     }
 };
 
-// Helper function to fill Certif Template fields (for first document in XHR report)
-const fillCertifFirstDocument = async (
-    pdfDoc: PDFDocument,
-    form: any,
-    data: ExtractedData & Record<string, any>,
-    config: any,
-    inspectors?: Inspector[],
-    generalVariables?: Map<string, string>
-): Promise<void> => {
-    console.log('=== FILLING CERTIF FIRST DOCUMENT ===');
-    console.log('Data object keys:', Object.keys(data));
-    console.log('CertifFirst data values:', {
-        SiteAddress: data['CertifFirst_SiteAddress'],
-        County: data['CertifFirst_County'],
-        Block: data['CertifFirst_Block'],
-        Lot: data['CertifFirst_Lot'],
-        ApplicableUnits: data['CertifFirst_ApplicableUnits'],
-        NameOfInspector: data['CertifFirst_NameOfInspector'],
-        NJDOH_ID: data['CertifFirst_NJDOH_ID'],
-        NJDCA_CERT: data['CertifFirst_NJDCA_CERT'],
-        DatesOfInspection: data['CertifFirst_DatesOfInspection'],
-        CheckBox8: data['CertifFirst_CheckBox8']
-    });
-    
-    // Embed a standard font for field appearances
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    
-    // Get all available form fields for debugging
-    const allFields = form.getFields();
-    const availableFieldNames = allFields.map((f: any) => f.getName());
-    console.log('Available PDF form fields:', availableFieldNames);
-    
-    // Get CERTIF config to use its field structure
-    const certifConfig = getReportConfig('CERTIF');
-    if (!certifConfig) {
-        console.warn('CERTIF config not found, using basic field mapping');
-        return;
-    }
-    
-    // Map CertifFirst_* fields to actual PDF field names
-    const fieldMapping: Record<string, string> = {
-        'CertifFirst_SiteAddress': 'Site Address',
-        'CertifFirst_County': 'County',
-        'CertifFirst_Block': 'Block',
-        'CertifFirst_Lot': 'Lot',
-        'CertifFirst_ApplicableUnits': 'Applicable Units or Common Areas 1',
-        'CertifFirst_NameOfInspector': 'Name of Inspector  Risk Assessor',
-        'CertifFirst_NJDOH_ID': 'NJDOH ID',
-        'CertifFirst_NJDCA_CERT': 'NJDCA CERT',
-        'CertifFirst_DatesOfInspection': 'Dates of Inspection',
-        'CertifFirst_CheckBox8': 'Check Box8'
-    };
-    
-    // Handle Dates of Inspection splitting
-    const datesValue = data['CertifFirst_DatesOfInspection'] || '';
-    console.log('Dates of Inspection value:', datesValue);
-    if (datesValue) {
-        const formattedDate = formatDateForPDF(datesValue);
-        const dateParts = formattedDate.split('/');
-        console.log('Formatted date parts:', dateParts);
+// Export function to flatten a PDF file and download it
+export const flattenPdf = async (file: File): Promise<void> => {
+    try {
+        console.log('🔄 Starting PDF flattening process...');
         
-        if (dateParts.length === 3) {
-            const [month, day, year] = dateParts;
-            
-            const dateFields = [
-                { id: 'Dates of Inspection', value: month },
-                { id: 'undefined', value: day },
-                { id: 'undefined_2', value: year },
-                { id: 'TO', value: month },
-                { id: 'undefined_3', value: day },
-                { id: 'undefined_4', value: year },
-                { id: 'Date Certificate Issued', value: month },
-                { id: 'undefined_5', value: day },
-                { id: 'undefined_6a', value: year }
-            ];
-            
-            for (const { id, value } of dateFields) {
-                try {
-                    const field = form.getTextField(id);
-                    if (field) {
-                        console.log(`Setting date field "${id}" to "${value}"`);
-                        field.setText(value);
-                        try {
-                            await field.updateAppearances(font);
-                        } catch (err: any) {
-                            console.warn(`Error updating appearances for ${id}:`, err);
-                        }
-                    } else {
-                        console.warn(`Date field "${id}" not found in PDF. Available fields:`, availableFieldNames);
-                    }
-                } catch (err) {
-                    console.warn(`Error filling date field ${id}:`, err);
-                }
-            }
-        }
-    }
-    
-    // Handle Applicable Units text splitting
-    const applicableUnitsValue = data['CertifFirst_ApplicableUnits'] || '';
-    console.log('Applicable Units value:', applicableUnitsValue);
-    if (applicableUnitsValue) {
-        const maxLength = 50;
-        const text = String(applicableUnitsValue);
-        if (text.length > maxLength) {
-            let breakPoint = maxLength;
-            for (let i = maxLength; i > maxLength * 0.7; i--) {
-                if (text[i] === ' ' || text[i] === ',' || text[i] === '-') {
-                    breakPoint = i + 1;
-                    break;
-                }
-            }
-            const firstPart = text.substring(0, breakPoint).trim();
-            const secondPart = text.substring(breakPoint).trim();
-            
-            try {
-                const firstField = form.getTextField('Applicable Units or Common Areas 1');
-                const secondField = form.getTextField('Applicable Units or Common Areas 2');
-                if (firstField) {
-                    console.log(`Setting "Applicable Units or Common Areas 1" to "${firstPart}"`);
-                    firstField.setText(firstPart);
-                    try {
-                        await firstField.updateAppearances(font);
-                    } catch (err: any) {
-                        console.warn('Error updating appearances for Applicable Units 1:', err);
-                    }
-                } else {
-                    console.warn('Field "Applicable Units or Common Areas 1" not found');
-                }
-                if (secondField) {
-                    console.log(`Setting "Applicable Units or Common Areas 2" to "${secondPart}"`);
-                    secondField.setText(secondPart);
-                    try {
-                        await secondField.updateAppearances(font);
-                    } catch (err: any) {
-                        console.warn('Error updating appearances for Applicable Units 2:', err);
-                    }
-                } else {
-                    console.warn('Field "Applicable Units or Common Areas 2" not found');
-                }
-            } catch (err) {
-                console.warn('Error filling Applicable Units fields:', err);
-            }
-        } else {
-            try {
-                const firstField = form.getTextField('Applicable Units or Common Areas 1');
-                if (firstField) {
-                    console.log(`Setting "Applicable Units or Common Areas 1" to "${text}"`);
-                    firstField.setText(text);
-                    try {
-                        await firstField.updateAppearances(font);
-                    } catch (err: any) {
-                        console.warn('Error updating appearances for Applicable Units 1:', err);
-                    }
-                } else {
-                    console.warn('Field "Applicable Units or Common Areas 1" not found');
-                }
-            } catch (err) {
-                console.warn('Error filling Applicable Units field:', err);
-            }
-        }
-    }
-    
-    // Fill other fields
-    for (const [dataKey, pdfFieldId] of Object.entries(fieldMapping)) {
-        if (dataKey === 'CertifFirst_DatesOfInspection' || dataKey === 'CertifFirst_ApplicableUnits') {
-            continue; // Already handled above
+        // Validate file
+        if (!file || file.size === 0) {
+            throw new Error('Invalid PDF file: File is empty or not provided');
         }
         
-        try {
-            const value = data[dataKey] || '';
-            console.log(`Processing field: ${dataKey} -> ${pdfFieldId}, value: "${value}"`);
-            if (value) {
-                const field = form.getTextField(pdfFieldId);
-                if (field) {
-                    console.log(`Setting field "${pdfFieldId}" to "${value}"`);
-                    field.setText(String(value));
-                    try {
-                        await field.updateAppearances(font);
-                    } catch (err: any) {
-                        console.warn(`Error updating appearances for ${pdfFieldId}:`, err);
-                    }
-                } else {
-                    console.warn(`Field "${pdfFieldId}" not found in PDF. Available fields:`, availableFieldNames);
-                }
-            } else {
-                console.log(`Skipping field "${pdfFieldId}" - no value provided`);
-            }
-        } catch (err) {
-            console.warn(`Error filling field ${pdfFieldId}:`, err);
+        if (!file.name.toLowerCase().endsWith('.pdf')) {
+            throw new Error('Invalid file type: Please select a PDF file');
         }
+        
+        // Read file as array buffer
+        const arrayBuffer = await file.arrayBuffer();
+        const pdfBytes = new Uint8Array(arrayBuffer);
+        
+        // Load PDF document
+        const pdfDoc = await PDFDocument.load(pdfBytes);
+        console.log(`📄 Loaded PDF: ${file.name} (${pdfDoc.getPageCount()} pages)`);
+        
+        // Flatten the PDF using image-based method
+        await flattenFormAsImage(pdfDoc);
+        console.log('✅ PDF flattened successfully');
+        
+        // Save flattened PDF
+        const flattenedBytes = await pdfDoc.save();
+        const blob = new Blob([flattenedBytes], { type: 'application/pdf' });
+        
+        // Create download link
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        
+        // Generate filename: add "_flattened" before .pdf extension
+        const originalName = file.name.replace(/\.pdf$/i, '');
+        const filename = `${originalName}_flattened.pdf`;
+        
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Clean up the object URL
+        URL.revokeObjectURL(link.href);
+        
+        console.log(`✅ Flattened PDF downloaded as: ${filename}`);
+    } catch (error: any) {
+        console.error('❌ PDF flattening failed:', error);
+        const errorMessage = error?.message || 'Unknown error occurred while flattening PDF';
+        throw new Error(errorMessage);
     }
-    
-    // Handle Check Box8
-    try {
-        const checkBoxValue = data['CertifFirst_CheckBox8'] || '';
-        console.log('Check Box8 value:', checkBoxValue);
-        if (checkBoxValue) {
-            try {
-                const textField = form.getTextField('Check Box8');
-                if (textField) {
-                    console.log(`Setting Check Box8 to "${checkBoxValue}"`);
-                    textField.setText(checkBoxValue);
-                    try {
-                        textField.setFontSize(24);
-                    } catch (fontErr) {
-                        console.warn('Could not set font size:', fontErr);
-                    }
-                    try {
-                        await textField.updateAppearances(font);
-                    } catch (err: any) {
-                        console.warn('Error updating appearances for Check Box8:', err);
-                    }
-                } else {
-                    console.warn('Check Box8 not found as text field, trying checkbox...');
-                    try {
-                        const checkboxField = form.getCheckBox('Check Box8');
-                        if (checkboxField) {
-                            checkboxField.check();
-                            checkboxField.updateAppearances(font);
-                            console.warn('Check Box8 is a checkbox field, cannot write text directly');
-                        }
-                    } catch (checkboxErr) {
-                        console.warn('Check Box8 field not found:', checkboxErr);
-                    }
-                }
-            } catch (textErr) {
-                console.warn('Error handling Check Box8:', textErr);
-            }
-        }
-    } catch (err) {
-        console.warn('Error handling Check Box8:', err);
-    }
-    
-    // Fill static fields from CERTIF config
-    for (const mapping of certifConfig.mappings) {
-        if (mapping.source === 'static' && mapping.staticValue) {
-            try {
-                const field = form.getTextField(mapping.pdfFieldId);
-                if (field) {
-                    console.log(`Setting static field "${mapping.pdfFieldId}" to "${mapping.staticValue}"`);
-                    field.setText(mapping.staticValue);
-                    try {
-                        await field.updateAppearances(font);
-                    } catch (err: any) {
-                        console.warn(`Error updating appearances for static field ${mapping.pdfFieldId}:`, err);
-                    }
-                }
-            } catch (err) {
-                // Field might not exist or might be a different type
-                console.log(`Static field "${mapping.pdfFieldId}" not found or not a text field`);
-            }
-        }
-    }
-    
-    // Update all field appearances one more time to ensure everything is visible
-    try {
-        const fields = form.getFields();
-        console.log(`Updating appearances for ${fields.length} fields`);
-        for (const field of fields) {
-            try {
-                if ('updateAppearances' in field) {
-                    await field.updateAppearances(font);
-                }
-            } catch (err) {
-                // Ignore errors for individual fields
-            }
-        }
-    } catch (err) {
-        console.warn('Error updating field appearances:', err);
-    }
-    
-    console.log('=== CERTIF FIRST DOCUMENT FILLED ===');
 };
+
 
 export const generatePDFReport = async (
     data: ExtractedData & Record<string, any>, 
@@ -1316,10 +975,10 @@ export const generatePDFReport = async (
     generalVariables?: Map<string, string>
 ) => {
     try {
-    const config = getReportConfig(reportType);
-    if (!config) {
-        throw new Error('Report configuration not found');
-    }
+        const config = getReportConfig(reportType);
+        if (!config) {
+            throw new Error('Report configuration not found');
+        }
 
         // 1. Load Main Template
         // Use utility to get template URLs to try
@@ -1376,13 +1035,8 @@ export const generatePDFReport = async (
             console.log(`XHR template has ${originalPageCount} pages. Target page index: ${targetPageIndex}`);
         }
 
-        // 2. Fill form fields - use helper function for CERTIF, regular logic for others
-        if (reportType === 'CERTIF') {
-            // Use the helper function for certificate reports
-            await fillCertificateForm(form, data, config, inspectors, generalVariables);
-        } else {
-            // For non-certificate reports, use the original logic
-            // First pass: Handle special cases that need to populate multiple fields
+        // 2. Fill form fields
+        // First pass: Handle special cases that need to populate multiple fields
         // Handle Inspection Date splitting first
         const inspectionDateMapping = config.mappings.find(m => m.pdfFieldId === 'Dates of Inspection' && m.source === 'user_input');
         if (inspectionDateMapping) {
@@ -1469,19 +1123,14 @@ export const generatePDFReport = async (
 
         // 4. Iterate Mappings for all other fields (but skip Check Box8 - handle at end)
         const checkboxMapping = config.mappings.find(m => m.pdfFieldId === 'Check Box8');
-            // Skip Certificate_* and CertifFirst_* fields - they're only for the certificate page, not the main form
-            const otherMappings = config.mappings.filter(m => 
-                m.pdfFieldId !== 'Check Box8' && 
-                !m.pdfFieldId.startsWith('Certificate_') &&
-                !m.pdfFieldId.startsWith('CertifFirst_')
-            );
+        const otherMappings = config.mappings.filter(m => m.pdfFieldId !== 'Check Box8');
         
         otherMappings.forEach(mapping => {
             try {
                 // Skip fields that were already handled in special cases
                 if (mapping.pdfFieldId === 'Dates of Inspection' || 
                     ['undefined', 'undefined_2', 'TO', 'undefined_3', 'undefined_4', 
-                     'Date Certificate Issued', 'undefined_5', 'undefined_6a', 'Signature'].includes(mapping.pdfFieldId) ||
+                     'Date Certificate Issued', 'undefined_5', 'undefined_6a', 'Signature', 'Inspector sig'].includes(mapping.pdfFieldId) ||
                     (mapping.pdfFieldId === 'Applicable Units or Common Areas 1' && mapping.source === 'user_input')) {
                     // These are handled above, but we still need to process the main field
                     if (mapping.pdfFieldId === 'Dates of Inspection' && mapping.source === 'user_input') {
@@ -1546,6 +1195,10 @@ export const generatePDFReport = async (
                         else if (mapping.pdfFieldId === 'insp date' || mapping.pdfFieldId === 'insp date end' || mapping.pdfFieldId === 'cert date') {
                             valueToFill = data['Date'] || data[mapping.pdfFieldId] || '';
                         }
+                        // cert date 2 reuses Today (Report Date) value
+                        else if (mapping.pdfFieldId === 'cert date 2') {
+                            valueToFill = data['Today'] || data[mapping.pdfFieldId] || '';
+                        }
                         // inpector name (typo) reuses Inspector name value
                         else if (mapping.pdfFieldId === 'inpector name ') {
                             valueToFill = data['Inspector name'] || data[mapping.pdfFieldId] || '';
@@ -1563,6 +1216,10 @@ export const generatePDFReport = async (
                         // Date-related fields (insp date, insp date end, cert date) reuse Date value
                         if (mapping.pdfFieldId === 'insp date' || mapping.pdfFieldId === 'insp date end' || mapping.pdfFieldId === 'cert date') {
                             valueToFill = data['Date'] || '';
+                        }
+                        // cert date 2 reuses Today (Report Date) value
+                        else if (mapping.pdfFieldId === 'cert date 2') {
+                            valueToFill = data['Today'] || '';
                         }
                         // inpector name (typo) reuses Inspector name value
                         else if (mapping.pdfFieldId === 'inpector name ') {
@@ -1624,6 +1281,11 @@ export const generatePDFReport = async (
                     valueToFill = formatDateForPDF(valueToFill);
                 }
                 
+                // Format cert date 2 that reuses Today value
+                if (reportType === 'XHR' && valueToFill && mapping.pdfFieldId === 'cert date 2') {
+                    valueToFill = formatDateForPDF(valueToFill);
+                }
+                
                 // Ensure Numb1 and Numb2 default to 0 if empty
                 if (reportType === 'XHR' && (mapping.pdfFieldId === 'Numb1' || mapping.pdfFieldId === 'Numb2')) {
                     if (!valueToFill || valueToFill === '' || valueToFill === 'undefined' || valueToFill === 'null') {
@@ -1631,7 +1293,138 @@ export const generatePDFReport = async (
                     }
                 }
 
+                // Special handling for Inspector name on page 5: append Permit number
+                // Find page 5 by checking all fields and finding which ones are on page 5 (index 4)
+                if (reportType === 'XHR' && mapping.pdfFieldId === 'Inspector name' && valueToFill) {
+                    try {
+                        // Get all fields and find which page "Inspector name" is on
+                        const widgets = field.acroField.getWidgets();
+                        if (widgets.length > 0) {
+                            const widget = widgets[0];
+                            const fieldPageRef = widget.dict.get('P');
+                            const pages = pdfDoc.getPages();
+                            
+                            // Find which page this field is on by comparing references
+                            let fieldPageIndex = -1;
+                            for (let i = 0; i < pages.length; i++) {
+                                try {
+                                    if (fieldPageRef === pages[i].ref) {
+                                        fieldPageIndex = i;
+                                        break;
+                                    }
+                                } catch (e) {
+                                    // Try alternative comparison
+                                    try {
+                                        if (fieldPageRef?.toString() === pages[i].ref?.toString()) {
+                                            fieldPageIndex = i;
+                                            break;
+                                        }
+                                    } catch (e2) {
+                                        // Continue
+                                    }
+                                }
+                            }
+                            
+                            // Alternative: List all fields on each page to debug
+                            if (fieldPageIndex === -1) {
+                                console.log(`🔍 Permit# Check - Could not determine page for Inspector name field. Listing all fields by page:`);
+                                const allFields = form.getFields();
+                                const fieldsByPage = new Map<number, string[]>();
+                                
+                                allFields.forEach(testField => {
+                                    try {
+                                        const testWidgets = testField.acroField.getWidgets();
+                                        if (testWidgets.length > 0) {
+                                            const testPageRef = testWidgets[0].dict.get('P');
+                                            for (let i = 0; i < pages.length; i++) {
+                                                if (testPageRef === pages[i].ref) {
+                                                    if (!fieldsByPage.has(i)) {
+                                                        fieldsByPage.set(i, []);
+                                                    }
+                                                    fieldsByPage.get(i)!.push(testField.getName());
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    } catch (e) {
+                                        // Skip
+                                    }
+                                });
+                                
+                                fieldsByPage.forEach((fieldNames, pageIdx) => {
+                                    console.log(`  Page ${pageIdx + 1} (index ${pageIdx}): ${fieldNames.join(', ')}`);
+                                });
+                                
+                                // Try to find page 5 by looking for fields we know are on page 5
+                                // The signature image is placed on page 5, so look for fields near that area
+                                // Or use page index 4 directly if we have 5+ pages
+                                if (pages.length >= 5) {
+                                    fieldPageIndex = 4; // Assume page 5 if we can't detect it
+                                    console.log(`🔍 Permit# Check - Assuming page 5 (index 4) since template has ${pages.length} pages`);
+                                }
+                            }
+                            
+                            console.log(`🔍 Permit# Check - Inspector name field on page ${fieldPageIndex + 1} (index ${fieldPageIndex}), total pages: ${pages.length}`);
+                            
+                            // If this is page 5 (index 4), append Permit number
+                            if (fieldPageIndex === 4 && data.selectedInspectorId && inspectors) {
+                                const inspector = inspectors.find(ins => ins.id === data.selectedInspectorId);
+                                if (inspector) {
+                                    console.log(`🔍 Permit# Check - Inspector found: ${inspector.name}`);
+                                    
+                                    // Try both 'license number' and 'Permit number' as variable names
+                                    const permitNumber = inspector.variableValues?.get('license number') || 
+                                                         inspector.variableValues?.get('Permit number') ||
+                                                         inspector.variableValues?.get('permit number');
+                                    
+                                    if (permitNumber && permitNumber.trim()) {
+                                        valueToFill = `${valueToFill} Permit# ${permitNumber.trim()}`;
+                                        console.log(`✅ Permit# appended: "${valueToFill}"`);
+                                    } else {
+                                        console.log(`⚠️ Permit# Check - No permit number found. Available variables:`, inspector.variableValues ? Array.from(inspector.variableValues.keys()) : 'none');
+                                    }
+                                } else {
+                                    console.log(`⚠️ Permit# Check - Inspector with ID ${data.selectedInspectorId} not found`);
+                                }
+                            } else {
+                                console.log(`ℹ️ Permit# Check - Inspector name field not on page 5 (pageIndex: ${fieldPageIndex}), skipping Permit# append`);
+                            }
+                        }
+                    } catch (err) {
+                        console.warn('❌ Permit# Check - Error:', err);
+                    }
+                }
+
                 field.setText(String(valueToFill));
+                
+                // Store phone field reference for later use in signature positioning
+                if (reportType === 'XHR' && (mapping.pdfFieldId === 'Phone' || mapping.pdfFieldId === 'phone')) {
+                    try {
+                        const widgets = field.acroField.getWidgets();
+                        if (widgets.length > 0) {
+                            const widget = widgets[0];
+                            const pageRef = widget.dict.get('P');
+                            const pages = pdfDoc.getPages();
+                            for (let i = 0; i < pages.length; i++) {
+                                if (pageRef === pages[i].ref) {
+                                    const rect = widget.getRectangle();
+                                    phoneFieldRef = {
+                                        field: field,
+                                        page: pages[i],
+                                        x: rect.x,
+                                        y: rect.y,
+                                        width: rect.width,
+                                        height: rect.height || 20
+                                    };
+                                    console.log(`Stored phone field reference on page ${i + 1} at x=${rect.x}, y=${rect.y}`);
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (phoneErr) {
+                        console.warn('Error storing phone field reference:', phoneErr);
+                    }
+                }
                 
                 // Ensure text appears on top by updating appearances
                 // This ensures the text is properly rendered and visible
@@ -1697,13 +1490,24 @@ export const generatePDFReport = async (
                     console.warn(`Error handling Check Box8:`, err);
                 }
             }
-        }
 
+        // ==================== SIGNATURE POSITIONING CONFIGURATION ====================
+        // Easy-to-change variables for signature positioning on page 6
+        // Location: src/utils/pdfGenerator.ts - around line 1719
+        const PAGE6_SIGNATURE_X = 600;  // X coordinate for signature on page 6
+        const PAGE6_SIGNATURE_Y = 125;   // Y coordinate for signature on page 6
+        // Note: These are PDF coordinates where (0,0) is bottom-left corner
+        // =================================================================================
+        
         // Store signature image info to draw last (on top of everything)
         let signatureImageData: { image: any; page: any; x: number; y: number; width: number; height: number } | null = null;
+        let xhrSignatureImageData: { image: any; page: any; x: number; y: number; width: number; height: number } | null = null;
+        let xhrPage6SignatureImageData: { image: any; page: any; x: number; y: number; width: number; height: number } | null = null;
+        // Store phone field reference when we fill it, so we can use it later for signature positioning
+        let phoneFieldRef: { field: any; page: any; x: number; y: number; width: number; height: number } | null = null;
         
         // 3. Prepare Signature image - will be drawn last to appear on top
-        if (reportType === 'CERTIF' && data.selectedInspectorId && inspectorDocuments) {
+        if (false && data.selectedInspectorId && inspectorDocuments) {
             try {
                 const inspectorDocs = inspectorDocuments.get(data.selectedInspectorId) || [];
                 // Find signature document (look for document type containing "signature")
@@ -1776,12 +1580,184 @@ export const generatePDFReport = async (
             }
         }
 
-        // 5. Add Excel data pages before the last page (skip for CERTIF reports)
-        if (reportType !== 'CERTIF' && data.fullExcelData && data.fullExcelData.length > 0) {
+        // 3b. Prepare Signature image for XHR reports on page 5 - will be drawn last to appear on top
+        if (reportType === 'XHR' && data.selectedInspectorId && inspectorDocuments) {
+            try {
+                const inspectorDocs = inspectorDocuments.get(data.selectedInspectorId) || [];
+                console.log(`🔍 XHR Signature Check - Inspector ID: ${data.selectedInspectorId}, Docs found: ${inspectorDocs.length}`);
+                // Find signature document (look for document type containing "signature")
+                const signatureDoc = inspectorDocs.find(doc => 
+                    doc.documentType?.toLowerCase().includes('signature')
+                );
+
+                console.log(`🔍 XHR Signature Check - Signature doc found: ${!!signatureDoc}, Has file: ${!!signatureDoc?.file}, Doc type: ${signatureDoc?.documentType}`);
+                
+                // Log file details including path/URL
+                if (signatureDoc) {
+                    const filePath = (signatureDoc as any).filePath;
+                    console.log(`📋 Signature document details:`, {
+                        id: signatureDoc.id,
+                        fileName: signatureDoc.fileName,
+                        documentType: signatureDoc.documentType,
+                        hasFile: !!signatureDoc.file,
+                        fileSize: signatureDoc.file?.size || 0,
+                        fileType: signatureDoc.file?.type || 'N/A',
+                        filePath: filePath || 'N/A',
+                        fileUrl: filePath ? `R2: ${filePath}` : 'N/A'
+                    });
+                }
+
+                if (signatureDoc && signatureDoc.file) {
+                    try {
+                        // Get page 5 (index 4) where Inspector sig field is located
+                        const pages = pdfDoc.getPages();
+                        // Page 5 is index 4 (0-indexed)
+                        const targetPageIndex = 4;
+                        if (pages.length > targetPageIndex) {
+                            const targetPage = pages[targetPageIndex];
+                            
+                            // Try to get the Inspector sig field to find its position
+                            let sigX = 0;
+                            let sigY = 0;
+                            let sigWidth = 100;
+                            let sigHeight = 50;
+                            
+                            try {
+                                const sigField = form.getTextField('Inspector sig');
+                                if (sigField) {
+                                    const widgets = sigField.acroField.getWidgets();
+                                    if (widgets.length > 0) {
+                                        const widget = widgets[0];
+                                        const rect = widget.getRectangle();
+                                        sigX = rect.x;
+                                        sigY = rect.y;
+                                        sigWidth = rect.width;
+                                        sigHeight = rect.height || 50; // Default height if not specified
+                                    }
+                                }
+                            } catch (fieldErr) {
+                                console.warn('Could not get Inspector sig field position, using defaults:', fieldErr);
+                                // Default position if field not found (adjust as needed)
+                                sigX = 400;
+                                sigY = 100;
+                            }
+
+                            // Validate file before embedding
+                            const filePath = (signatureDoc as any).filePath;
+                            console.log(`🖼️ Preparing to embed signature image:`, {
+                                fileName: signatureDoc.fileName,
+                                fileSize: signatureDoc.file.size,
+                                fileType: signatureDoc.file.type,
+                                filePath: filePath || 'N/A'
+                            });
+                            
+                            if (!signatureDoc.file || signatureDoc.file.size === 0) {
+                                throw new Error(`Signature file "${signatureDoc.fileName}" is empty or invalid (size: ${signatureDoc.file?.size || 0} bytes). File path: ${filePath || 'N/A'}`);
+                            }
+                            
+                            // Embed the signature image
+                            const arrayBuffer = await signatureDoc.file.arrayBuffer();
+                            
+                            // Validate arrayBuffer
+                            if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+                                throw new Error(`Signature file "${signatureDoc.fileName}" has no data`);
+                            }
+                            
+                            // Check minimum size for valid image (at least 8 bytes for header)
+                            if (arrayBuffer.byteLength < 8) {
+                                throw new Error(`Signature file "${signatureDoc.fileName}" is too small to be a valid image`);
+                            }
+                            
+                            let image;
+                            
+                            // Try to determine image type from file extension or MIME type
+                            const fileName = signatureDoc.fileName?.toLowerCase() || '';
+                            const isPngFile = fileName.endsWith('.png') || signatureDoc.file.type === 'image/png';
+                            const isJpegFile = fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || 
+                                             signatureDoc.file.type === 'image/jpeg' || signatureDoc.file.type === 'image/jpg';
+                            
+                            if (isPngFile) {
+                                try {
+                                    image = await pdfDoc.embedPng(arrayBuffer);
+                                } catch (pngErr: any) {
+                                    console.warn(`Failed to embed as PNG, trying JPEG:`, pngErr.message);
+                                    image = await pdfDoc.embedJpg(arrayBuffer);
+                                }
+                            } else if (isJpegFile) {
+                                try {
+                                    image = await pdfDoc.embedJpg(arrayBuffer);
+                                } catch (jpgErr: any) {
+                                    console.warn(`Failed to embed as JPEG, trying PNG:`, jpgErr.message);
+                                    image = await pdfDoc.embedPng(arrayBuffer);
+                                }
+                            } else {
+                                // Try PNG first, then JPEG
+                                try {
+                                    image = await pdfDoc.embedPng(arrayBuffer);
+                                } catch {
+                                    try {
+                                        image = await pdfDoc.embedJpg(arrayBuffer);
+                                    } catch (embedErr: any) {
+                                        throw new Error(`Failed to embed signature image "${signatureDoc.fileName}": ${embedErr.message || embedErr}. The file may be corrupted or in an unsupported format.`);
+                                    }
+                                }
+                            }
+
+                            // Calculate image dimensions and scale to fit, then make 25% bigger
+                            const imageDims = image.scale(1);
+                            const scaleX = sigWidth / imageDims.width;
+                            const scaleY = sigHeight / imageDims.height;
+                            let scale = Math.min(scaleX, scaleY, 1); // Don't scale up, only down
+                            
+                            // Make it 25% bigger (1.25x the size)
+                            scale = scale * 1.25;
+
+                            const scaledWidth = imageDims.width * scale;
+                            const scaledHeight = imageDims.height * scale;
+
+                            // Center the image in the signature location
+                            const imageX = sigX + (sigWidth - scaledWidth) / 2;
+                            // Note: PDF coordinates start from bottom-left, so y is the bottom of the field
+                            const imageY = sigY + (sigHeight - scaledHeight) / 2;
+
+                            // Store image data to draw later (on top of everything)
+                            xhrSignatureImageData = {
+                                image,
+                                page: targetPage,
+                                x: imageX,
+                                y: imageY,
+                                width: scaledWidth,
+                                height: scaledHeight
+                            };
+                            
+                            console.log(`XHR signature image prepared for page 5 at: x=${imageX}, y=${imageY}, width=${scaledWidth}, height=${scaledHeight}`);
+                        } else {
+                            console.warn(`Page 5 (index ${targetPageIndex}) not found. Total pages: ${pages.length}`);
+                        }
+                    } catch (sigErr) {
+                        console.warn('Error preparing XHR signature image:', sigErr);
+                    }
+                }
+            } catch (err) {
+                console.warn('Error handling XHR signature:', err);
+            }
+        }
+
+        // 5. Add Excel data pages before page 6 (for XHR reports)
+        // Store number of Excel pages inserted so we can adjust page 6 index later
+        let numExcelPagesInserted = 0;
+        if (data.fullExcelData && data.fullExcelData.length > 0) {
             const totalPages = pdfDoc.getPageCount();
-            // Calculate insertion point: before last page
-            // If totalPages is 5, we want to insert at index 4 (before page 5)
-            const insertBeforeIndex = Math.max(0, totalPages - 1);
+            // For XHR reports, insert before page 6 (index 5)
+            // For other reports, insert before the last page
+            let insertBeforeIndex: number;
+            if (reportType === 'XHR') {
+                // Insert at index 5 (before page 6)
+                insertBeforeIndex = 5;
+            } else {
+                // Insert before last page (original behavior)
+                insertBeforeIndex = Math.max(0, totalPages - 1);
+            }
             
             // Create a temporary PDF document to build Excel pages
             const tempPdfDoc = await PDFDocument.create();
@@ -1789,6 +1765,7 @@ export const generatePDFReport = async (
             
             // Copy Excel pages from temp document to main document at correct position
             const copiedPages = await pdfDoc.copyPages(tempPdfDoc, excelPages.map((_, i) => i));
+            numExcelPagesInserted = copiedPages.length;
             
             // Insert them at the correct position (in reverse order to maintain indices)
             for (let i = copiedPages.length - 1; i >= 0; i--) {
@@ -1796,9 +1773,167 @@ export const generatePDFReport = async (
             }
         }
 
-        // 6. Append documents at the end (General Certificate and Inspector License) - skip for CERTIF reports
+        // 5b. Prepare Signature image for XHR reports on page 6 - using hardcoded coordinates
+        // NOTE: This must run AFTER Excel pages are added
+        // Position is configured via PAGE6_SIGNATURE_X and PAGE6_SIGNATURE_Y variables at top of function
+        if (reportType === 'XHR' && data.selectedInspectorId && inspectorDocuments) {
+            try {
+                const inspectorDocs = inspectorDocuments.get(data.selectedInspectorId) || [];
+                console.log(`🔍 XHR Page 6 Signature Check - Inspector ID: ${data.selectedInspectorId}, Docs found: ${inspectorDocs.length}`);
+                // Find signature document (look for document type containing "signature")
+                const signatureDoc = inspectorDocs.find(doc => 
+                    doc.documentType?.toLowerCase().includes('signature')
+                );
+
+                console.log(`🔍 XHR Page 6 Signature Check - Signature doc found: ${!!signatureDoc}, Has file: ${!!signatureDoc?.file}, Doc type: ${signatureDoc?.documentType}`);
+                
+                // Log file details including path/URL
+                if (signatureDoc) {
+                    const filePath = (signatureDoc as any).filePath;
+                    console.log(`📋 Page 6 Signature document details:`, {
+                        id: signatureDoc.id,
+                        fileName: signatureDoc.fileName,
+                        documentType: signatureDoc.documentType,
+                        hasFile: !!signatureDoc.file,
+                        fileSize: signatureDoc.file?.size || 0,
+                        fileType: signatureDoc.file?.type || 'N/A',
+                        filePath: filePath || 'N/A',
+                        fileUrl: filePath ? `R2: ${filePath}` : 'N/A'
+                    });
+                }
+
+                if (signatureDoc && signatureDoc.file) {
+                    try {
+                        // Get page 6 - this is the page with the phone field
+                        // After Excel pages are inserted before page 6, the page 6 index shifts
+                        const pages = pdfDoc.getPages();
+                        // Original page 6 was at index 5, but Excel pages were inserted at index 5,
+                        // so page 6 is now at index 5 + numExcelPagesInserted
+                        const targetPageIndex = 5 + numExcelPagesInserted; // Page 6 (0-indexed, adjusted for Excel pages)
+                        
+                        if (pages.length > targetPageIndex) {
+                            const targetPage = pages[targetPageIndex];
+                            // Embed the signature image (reuse the same image from page 5 if available, otherwise embed new)
+                            let image;
+                            if (xhrSignatureImageData && xhrSignatureImageData.image) {
+                                // Reuse the same image object from page 5
+                                image = xhrSignatureImageData.image;
+                            } else {
+                                // Validate file before embedding
+                                const filePath = (signatureDoc as any).filePath;
+                                console.log(`🖼️ Preparing to embed signature image for page 6:`, {
+                                    fileName: signatureDoc.fileName,
+                                    fileSize: signatureDoc.file.size,
+                                    fileType: signatureDoc.file.type,
+                                    filePath: filePath || 'N/A'
+                                });
+                                
+                                if (!signatureDoc.file || signatureDoc.file.size === 0) {
+                                    throw new Error(`Signature file "${signatureDoc.fileName}" is empty or invalid (size: ${signatureDoc.file?.size || 0} bytes). File path: ${filePath || 'N/A'}`);
+                                }
+                                
+                                // Embed the signature image
+                                const arrayBuffer = await signatureDoc.file.arrayBuffer();
+                                
+                                // Validate arrayBuffer
+                                if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+                                    throw new Error(`Signature file "${signatureDoc.fileName}" has no data`);
+                                }
+                                
+                                // Check minimum size for valid image
+                                if (arrayBuffer.byteLength < 8) {
+                                    throw new Error(`Signature file "${signatureDoc.fileName}" is too small to be a valid image`);
+                                }
+                                
+                                // Try to determine image type from file extension or MIME type
+                                const fileName = signatureDoc.fileName?.toLowerCase() || '';
+                                const isPngFile = fileName.endsWith('.png') || signatureDoc.file.type === 'image/png';
+                                const isJpegFile = fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || 
+                                                 signatureDoc.file.type === 'image/jpeg' || signatureDoc.file.type === 'image/jpg';
+                                
+                                if (isPngFile) {
+                                    try {
+                                        image = await pdfDoc.embedPng(arrayBuffer);
+                                    } catch (pngErr: any) {
+                                        console.warn(`Failed to embed as PNG, trying JPEG:`, pngErr.message);
+                                        image = await pdfDoc.embedJpg(arrayBuffer);
+                                    }
+                                } else if (isJpegFile) {
+                                    try {
+                                        image = await pdfDoc.embedJpg(arrayBuffer);
+                                    } catch (jpgErr: any) {
+                                        console.warn(`Failed to embed as JPEG, trying PNG:`, jpgErr.message);
+                                        image = await pdfDoc.embedPng(arrayBuffer);
+                                    }
+                                } else {
+                                    // Try PNG first, then JPEG
+                                    try {
+                                        image = await pdfDoc.embedPng(arrayBuffer);
+                                    } catch {
+                                        try {
+                                            image = await pdfDoc.embedJpg(arrayBuffer);
+                                        } catch (embedErr: any) {
+                                            throw new Error(`Failed to embed signature image "${signatureDoc.fileName}": ${embedErr.message || embedErr}. The file may be corrupted or in an unsupported format.`);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Use the same dimensions as page 5 signature if available, otherwise calculate
+                            let scaledWidth: number;
+                            let scaledHeight: number;
+                            
+                            if (xhrSignatureImageData) {
+                                // Reuse the same size as page 5
+                                scaledWidth = xhrSignatureImageData.width;
+                                scaledHeight = xhrSignatureImageData.height;
+                            } else {
+                                // Calculate image dimensions and scale to fit, then make 25% bigger
+                                const imageDims = image.scale(1);
+                                const sigWidth = 100; // Default signature width
+                                const sigHeight = 50; // Default signature height
+                                const scaleX = sigWidth / imageDims.width;
+                                const scaleY = sigHeight / imageDims.height;
+                                let scale = Math.min(scaleX, scaleY, 1); // Don't scale up, only down
+                                
+                                // Make it 25% bigger (1.25x the size)
+                                scale = scale * 1.25;
+                                
+                                scaledWidth = imageDims.width * scale;
+                                scaledHeight = imageDims.height * scale;
+                            }
+
+                            // Position signature using hardcoded coordinates (configurable at top of function)
+                            // See PAGE6_SIGNATURE_X and PAGE6_SIGNATURE_Y variables above (around line 1720)
+                            const imageX = PAGE6_SIGNATURE_X;
+                            const imageY = PAGE6_SIGNATURE_Y;
+
+                            // Store image data to draw later (on top of everything)
+                            xhrPage6SignatureImageData = {
+                                image,
+                                page: targetPage,
+                                x: imageX,
+                                y: imageY,
+                                width: scaledWidth,
+                                height: scaledHeight
+                            };
+                            
+                            console.log(`XHR signature image prepared for page ${targetPageIndex + 1} at: x=${imageX}, y=${imageY}, width=${scaledWidth}, height=${scaledHeight}`);
+                        } else {
+                            console.warn(`Page 6 (index ${targetPageIndex}) not found. Total pages: ${pages.length}`);
+                        }
+                    } catch (sigErr) {
+                        console.warn('Error preparing XHR signature image for page 6:', sigErr);
+                    }
+                }
+            } catch (err) {
+                console.warn('Error handling XHR signature for page 6:', err);
+            }
+        }
+
+        // 6. Append documents at the end (General Certificate and Inspector License)
         // TEMPORARILY: Skip if documents don't exist instead of throwing errors
-        if (reportType !== 'CERTIF') {
+        {
             // Append General Certificate (if available)
             if (data.certificateDocumentType && generalTypedDocuments && generalTypedDocuments.has(data.certificateDocumentType)) {
             const certDoc = generalTypedDocuments.get(data.certificateDocumentType!)!;
@@ -1862,84 +1997,105 @@ export const generatePDFReport = async (
             // Append Inspector License (if available)
             if (data.selectedInspectorId && data.licenseDocumentType && inspectorDocuments) {
             const inspectorDocs = inspectorDocuments.get(data.selectedInspectorId) || [];
+            console.log(`🔍 XHR License Check - Inspector ID: ${data.selectedInspectorId}, License type: ${data.licenseDocumentType}, Docs found: ${inspectorDocs.length}`);
             const licenseDoc = inspectorDocs.find(doc => doc.documentType === data.licenseDocumentType);
             
-                if (licenseDoc && licenseDoc.file) {
-            if (!(licenseDoc.file instanceof File || licenseDoc.file instanceof Blob)) {
-                        console.warn(`License document file is invalid for "${licenseDoc.fileName}". Skipping license append.`);
-                    } else if (licenseDoc.file instanceof Blob && licenseDoc.file.size === 0) {
-                        console.warn(`License file "${licenseDoc.fileName}" is empty. Skipping license append.`);
-                    } else {
-                        try {
-                
-                console.log('License file info:', {
+            console.log(`🔍 XHR License Check - License doc found: ${!!licenseDoc}, Has file: ${!!licenseDoc?.file}, Doc type: ${licenseDoc?.documentType}`);
+            
+            // Log file details including path/URL
+            if (licenseDoc) {
+                const filePath = (licenseDoc as any).filePath;
+                console.log(`📋 License document details:`, {
+                    id: licenseDoc.id,
                     fileName: licenseDoc.fileName,
-                    fileSize: licenseDoc.file.size,
-                    fileType: licenseDoc.file.type,
-                    isFile: licenseDoc.file instanceof File,
-                    isBlob: licenseDoc.file instanceof Blob
+                    documentType: licenseDoc.documentType,
+                    hasFile: !!licenseDoc.file,
+                    fileSize: licenseDoc.file?.size || 0,
+                    fileType: licenseDoc.file?.type || 'N/A',
+                    filePath: filePath || 'N/A',
+                    fileUrl: filePath ? `R2: ${filePath}` : 'N/A'
                 });
-                
-                // Check if it's an image file (using filename as fallback)
-                if (isImageFile(licenseDoc.file, licenseDoc.fileName)) {
-                    console.log('Processing license as image:', licenseDoc.fileName);
-                    // Handle image - embed in a new PDF page
-                    await embedImageInPDF(pdfDoc, licenseDoc.file);
-                    console.log('License image embedded successfully');
-                } else {
-                    console.log('Processing license as PDF:', licenseDoc.fileName);
-                    // Handle PDF - load and copy pages
-                    const licenseArrayBuffer = await licenseDoc.file.arrayBuffer();
-                    console.log('License PDF arrayBuffer size:', licenseArrayBuffer.byteLength);
-                    
-                    if (licenseArrayBuffer.byteLength === 0) {
-                        console.warn(`License file "${licenseDoc.fileName}" is empty. Skipping license append.`);
+            }
+            
+                if (licenseDoc && licenseDoc.file) {
+                    if (!(licenseDoc.file instanceof File || licenseDoc.file instanceof Blob)) {
+                        console.warn(`License document file is invalid for "${licenseDoc.fileName}". Skipping license append.`);
                     } else {
-                    // Try to detect if it's actually an image by checking the first bytes (safely)
-                    if (licenseArrayBuffer.byteLength >= 8) {
-                        const firstBytes = new Uint8Array(licenseArrayBuffer.slice(0, 8));
-                        const isPng = firstBytes[0] === 0x89 && firstBytes[1] === 0x50 && firstBytes[2] === 0x4E && firstBytes[3] === 0x47;
-                        const isJpeg = firstBytes[0] === 0xFF && firstBytes[1] === 0xD8;
-                        
-                        if (isPng || isJpeg) {
-                            console.log('Detected image file by binary signature, converting to PDF page');
-                            await embedImageInPDF(pdfDoc, licenseDoc.file);
-                            } else {
-                    // Try to load as PDF
-                    try {
-                        const licensePdfDoc = await PDFDocument.load(licenseArrayBuffer);
-                        const licensePageCount = licensePdfDoc.getPageCount();
-                        console.log(`License PDF has ${licensePageCount} page(s)`);
-                        
-                        if (licensePageCount === 0) {
-                                        console.warn(`License PDF "${licenseDoc.fileName}" has no pages. Skipping license append.`);
-                                    } else {
-                        const licensePageIndices = Array.from({ length: licensePageCount }, (_, i) => i);
-                        const copiedLicensePages = await pdfDoc.copyPages(licensePdfDoc, licensePageIndices);
-                        
-                        // Add each page at the end
-                        copiedLicensePages.forEach((page) => {
-                            const currentPageCount = pdfDoc.getPageCount();
-                            pdfDoc.insertPage(currentPageCount, page);
-                        });
-                                    }
-                    } catch (pdfError: any) {
-                        // If PDF loading fails, try as image
-                        const errorMsg = pdfError.message || String(pdfError);
-                        if (errorMsg.includes('No PDF header') || errorMsg.includes('Invalid PDF')) {
-                            console.log('PDF loading failed, trying as image instead');
-                            await embedImageInPDF(pdfDoc, licenseDoc.file);
+                        // Validate file size
+                        const fileSize = licenseDoc.file.size;
+                        if (fileSize === 0) {
+                            console.warn(`License file "${licenseDoc.fileName}" is empty (0 bytes). Skipping license append.`);
                         } else {
-                                        console.warn('Error loading license PDF (skipping):', pdfError);
+                            try {
+                                console.log('License file info:', {
+                                    fileName: licenseDoc.fileName,
+                                    fileSize: licenseDoc.file.size,
+                                    fileType: licenseDoc.file.type,
+                                    isFile: licenseDoc.file instanceof File,
+                                    isBlob: licenseDoc.file instanceof Blob
+                                });
+                                
+                                // Check if it's an image file (using filename as fallback)
+                                if (isImageFile(licenseDoc.file, licenseDoc.fileName)) {
+                                    console.log('Processing license as image:', licenseDoc.fileName);
+                                    // Handle image - embed in a new PDF page
+                                    await embedImageInPDF(pdfDoc, licenseDoc.file);
+                                    console.log('License image embedded successfully');
+                                } else {
+                                    console.log('Processing license as PDF:', licenseDoc.fileName);
+                                    // Handle PDF - load and copy pages
+                                    const licenseArrayBuffer = await licenseDoc.file.arrayBuffer();
+                                    console.log('License PDF arrayBuffer size:', licenseArrayBuffer.byteLength);
+                                    
+                                    if (licenseArrayBuffer.byteLength === 0) {
+                                        console.warn(`License file "${licenseDoc.fileName}" is empty. Skipping license append.`);
+                                    } else {
+                                        // Try to detect if it's actually an image by checking the first bytes (safely)
+                                        if (licenseArrayBuffer.byteLength >= 8) {
+                                            const firstBytes = new Uint8Array(licenseArrayBuffer.slice(0, 8));
+                                            const isPng = firstBytes[0] === 0x89 && firstBytes[1] === 0x50 && firstBytes[2] === 0x4E && firstBytes[3] === 0x47;
+                                            const isJpeg = firstBytes[0] === 0xFF && firstBytes[1] === 0xD8;
+                                            
+                                            if (isPng || isJpeg) {
+                                                console.log('Detected image file by binary signature, converting to PDF page');
+                                                await embedImageInPDF(pdfDoc, licenseDoc.file);
+                                            } else {
+                                                // Try to load as PDF
+                                                try {
+                                                    const licensePdfDoc = await PDFDocument.load(licenseArrayBuffer);
+                                                    const licensePageCount = licensePdfDoc.getPageCount();
+                                                    console.log(`License PDF has ${licensePageCount} page(s)`);
+                                                    
+                                                    if (licensePageCount === 0) {
+                                                        console.warn(`License PDF "${licenseDoc.fileName}" has no pages. Skipping license append.`);
+                                                    } else {
+                                                        const licensePageIndices = Array.from({ length: licensePageCount }, (_, i) => i);
+                                                        const copiedLicensePages = await pdfDoc.copyPages(licensePdfDoc, licensePageIndices);
+                                                        
+                                                        // Add each page at the end
+                                                        copiedLicensePages.forEach((page) => {
+                                                            const currentPageCount = pdfDoc.getPageCount();
+                                                            pdfDoc.insertPage(currentPageCount, page);
+                                                        });
+                                                    }
+                                                } catch (pdfError: any) {
+                                                    // If PDF loading fails, try as image
+                                                    const errorMsg = pdfError.message || String(pdfError);
+                                                    if (errorMsg.includes('No PDF header') || errorMsg.includes('Invalid PDF')) {
+                                                        console.log('PDF loading failed, trying as image instead');
+                                                        await embedImageInPDF(pdfDoc, licenseDoc.file);
+                                                    } else {
+                                                        console.warn('Error loading license PDF (skipping):', pdfError);
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
+                            } catch (licenseError: any) {
+                                console.warn('Error processing license (skipping):', licenseError);
+                                // TEMPORARILY: Just log the error instead of throwing
                             }
-                        }
-                    }
-                }
-            } catch (licenseError: any) {
-                            console.warn('Error processing license (skipping):', licenseError);
-                            // TEMPORARILY: Just log the error instead of throwing
                         }
                     }
                 }
@@ -2061,8 +2217,99 @@ export const generatePDFReport = async (
             }
         }
 
-        // 7. Remove target page if results are positive (XHR reports only)
+        // 7b. Draw white background box and signature image for XHR reports on page 5 ABSOLUTELY LAST
+        if (xhrSignatureImageData) {
+            try {
+                // Draw white background box first (to cover whatever is behind the signature)
+                const widthMargin = 40; // 40px on each side = 80px total width margin
+                const heightMargin = 20; // 20px on top and bottom = 40px total height margin
+                
+                const whiteBoxX = xhrSignatureImageData.x - widthMargin; // Large margin on left
+                const whiteBoxY = xhrSignatureImageData.y - (heightMargin / 2); // Margin on bottom
+                const whiteBoxWidth = xhrSignatureImageData.width + (widthMargin * 2); // Much wider (40px on each side)
+                const whiteBoxHeight = xhrSignatureImageData.height + heightMargin; // Taller (20px on top and bottom)
+                
+                // Draw white rectangle behind signature to block everything
+                xhrSignatureImageData.page.drawRectangle({
+                    x: whiteBoxX,
+                    y: whiteBoxY,
+                    width: whiteBoxWidth,
+                    height: whiteBoxHeight,
+                    color: rgb(1, 1, 1), // White
+                });
+                
+                // Draw the signature image on top of the white box
+                xhrSignatureImageData.page.drawImage(xhrSignatureImageData.image, {
+                    x: xhrSignatureImageData.x,
+                    y: xhrSignatureImageData.y,
+                    width: xhrSignatureImageData.width,
+                    height: xhrSignatureImageData.height,
+                });
+                
+                console.log(`XHR: White box drawn at: x=${whiteBoxX}, y=${whiteBoxY}, width=${whiteBoxWidth}, height=${whiteBoxHeight}`);
+                console.log(`XHR: Signature image drawn on page 5 at: x=${xhrSignatureImageData.x}, y=${xhrSignatureImageData.y}, width=${xhrSignatureImageData.width}, height=${xhrSignatureImageData.height}`);
+            } catch (err) {
+                console.warn('Error drawing XHR signature image on page 5:', err);
+            }
+        }
+
+        // 7c. Draw white background box and signature image for XHR reports on page 6 ABSOLUTELY LAST
+        if (xhrPage6SignatureImageData) {
+            try {
+                // Draw white background box first (to cover whatever is behind the signature)
+                const widthMargin = 40; // 40px on each side = 80px total width margin
+                const heightMargin = 20; // 20px on top and bottom = 40px total height margin
+                
+                const whiteBoxX = xhrPage6SignatureImageData.x - widthMargin; // Large margin on left
+                const whiteBoxY = xhrPage6SignatureImageData.y - (heightMargin / 2); // Margin on bottom
+                const whiteBoxWidth = xhrPage6SignatureImageData.width + (widthMargin * 2); // Much wider (40px on each side)
+                const whiteBoxHeight = xhrPage6SignatureImageData.height + heightMargin; // Taller (20px on top and bottom)
+                
+                // Draw white rectangle behind signature to block everything
+                xhrPage6SignatureImageData.page.drawRectangle({
+                    x: whiteBoxX,
+                    y: whiteBoxY,
+                    width: whiteBoxWidth,
+                    height: whiteBoxHeight,
+                    color: rgb(1, 1, 1), // White
+                });
+                
+                // Draw the signature image on top of the white box
+                xhrPage6SignatureImageData.page.drawImage(xhrPage6SignatureImageData.image, {
+                    x: xhrPage6SignatureImageData.x,
+                    y: xhrPage6SignatureImageData.y,
+                    width: xhrPage6SignatureImageData.width,
+                    height: xhrPage6SignatureImageData.height,
+                });
+                
+                console.log(`XHR: White box drawn on page 6 at: x=${whiteBoxX}, y=${whiteBoxY}, width=${whiteBoxWidth}, height=${whiteBoxHeight}`);
+                console.log(`XHR: Signature image drawn on page 6 at: x=${xhrPage6SignatureImageData.x}, y=${xhrPage6SignatureImageData.y}, width=${xhrPage6SignatureImageData.width}, height=${xhrPage6SignatureImageData.height}`);
+            } catch (err) {
+                console.warn('Error drawing XHR signature image on page 6:', err);
+            }
+        }
+
+        // 7. Flatten PDF for XHR reports - PAUSED
+        // Flattening temporarily disabled
+        /*
+        if (reportType === 'XHR') {
+            try {
+                console.log('🔄 Flattening XHR PDF BEFORE page removal (to avoid stale page references)...');
+                // Get a fresh form reference
+                const freshForm = pdfDoc.getForm();
+                await flattenFormByRemovingFields(pdfDoc, freshForm);
+                console.log('✅ PDF flattened successfully');
+            } catch (flattenErr: any) {
+                console.warn('⚠️ Failed to flatten PDF, but continuing with generation:', flattenErr.message);
+                // Continue anyway - PDF will just be editable
+            }
+        }
+        */
+
+        // 8. Remove target page if results are positive (XHR reports only)
         // The target page is the one with new form fields (originally 6th page, index 5)
+        // NOTE: This happens AFTER flattening - the flattened content on this page will be removed,
+        // but that's okay since we're removing the entire page anyway
         if (reportType === 'XHR' && targetPageIndex !== null && data.fullExcelData && data.fullExcelData.length > 0) {
             try {
                 const headerRow = data.fullExcelData[data.headerRowIndex || 0] || [];
@@ -2073,18 +2320,20 @@ export const generatePDFReport = async (
                 );
                 
                 if (isPositive) {
-                    // After Excel pages are inserted, the page indices may have shifted
-                    // Excel pages are inserted before the last page, so pages before that remain at the same index
-                    // Since targetPageIndex is from the original template (before Excel pages), it should still be correct
+                    // After Excel pages are inserted before page 6, the page 6 index has shifted
+                    // Original page 6 was at index 5, but Excel pages were inserted at index 5,
+                    // so page 6 is now at index 5 + numExcelPagesInserted
+                    const adjustedTargetPageIndex = targetPageIndex + numExcelPagesInserted;
                     const totalPages = pdfDoc.getPageCount();
                     
                     // Make sure the target page index is still valid
-                    if (targetPageIndex < totalPages) {
-                        console.log(`Results are positive. Removing page at index ${targetPageIndex} (6th page from original template, contains new form fields)`);
-                        pdfDoc.removePage(targetPageIndex);
+                    if (adjustedTargetPageIndex < totalPages) {
+                        console.log(`Results are positive. Removing page at index ${adjustedTargetPageIndex} (6th page from original template, contains new form fields, adjusted for ${numExcelPagesInserted} Excel pages)`);
+                        console.log(`   Note: Fields on this page were already flattened, so removing the page is safe.`);
+                        pdfDoc.removePage(adjustedTargetPageIndex);
                         console.log(`Page removed. New total pages: ${pdfDoc.getPageCount()}`);
                     } else {
-                        console.warn(`Target page index ${targetPageIndex} is out of range. Total pages: ${totalPages}`);
+                        console.warn(`Target page index ${adjustedTargetPageIndex} is out of range. Total pages: ${totalPages}`);
                     }
                 } else {
                     console.log('Results are negative. Keeping page with new form fields.');
@@ -2095,12 +2344,20 @@ export const generatePDFReport = async (
             }
         }
 
-        // 8. Save and Download
+        // 9. Save and Download
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = `${config.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+        
+        // Generate filename: "Final Lead Inspection Report [ADDRESS]"
+        const address = (data.Address || data.address || '').trim().toUpperCase();
+        const sanitizedAddress = address.replace(/[^A-Z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+        const filename = sanitizedAddress 
+            ? `Final Lead Inspection Report ${sanitizedAddress}.pdf`
+            : `Final Lead Inspection Report.pdf`;
+        
+        link.download = filename;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);

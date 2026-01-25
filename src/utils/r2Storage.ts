@@ -3,6 +3,8 @@ const R2_ENDPOINT = process.env.REACT_APP_R2_ENDPOINT || '';
 const R2_ACCESS_KEY_ID = process.env.REACT_APP_R2_ACCESS_KEY_ID || '';
 const R2_SECRET_ACCESS_KEY = process.env.REACT_APP_R2_SECRET_ACCESS_KEY || '';
 const R2_BUCKET_NAME = process.env.REACT_APP_R2_BUCKET_NAME || 'lead-reports';
+// Public R2 domain (for direct file access without CORS)
+const R2_PUBLIC_DOMAIN = process.env.REACT_APP_R2_PUBLIC_DOMAIN || 'https://pub-4bdeaebf0c04411e9096fdda492f0706.r2.dev';
 
 // Debug: Log environment variables (without exposing secrets)
 console.log('🔍 R2 Environment Variables Check:', {
@@ -145,37 +147,85 @@ export const uploadFileToR2 = async (file: File | Blob, key: string): Promise<st
 };
 
 /**
- * Get a file from R2 storage
+ * Get a file from R2 storage directly from Cloudflare R2 endpoint
  * @param key The R2 key/path of the file
  * @returns The file as a Blob
  */
 export const getFileFromR2 = async (key: string): Promise<Blob> => {
-  const sdkAvailable = await ensureSDKLoaded();
-  
-  if (!sdkAvailable || !s3Client) {
-    throw new Error('R2 client not initialized. Please check your .env configuration and ensure AWS SDK is installed.');
-  }
-  
   try {
-    const GetObjectCommand = (globalThis as any).__r2GetObjectCommand;
-    const command = new GetObjectCommand({
-      Bucket: R2_BUCKET_NAME,
-      Key: key,
-    });
-
-    const response = await s3Client.send(command);
+    // Use direct R2 endpoint URL
+    // Format: https://{account-id}.r2.cloudflarestorage.com/{bucket}/{key}
+    const bucket = R2_BUCKET_NAME;
+    const r2Url = `${R2_ENDPOINT}/${bucket}/${key}`;
     
-    if (!response.Body) {
-      throw new Error(`File not found in R2: ${key}`);
+    // Also try public domain if available
+    const publicUrl = R2_PUBLIC_DOMAIN ? `${R2_PUBLIC_DOMAIN}/${key}` : null;
+    
+    console.log('📥 Fetching file from R2:', {
+      key,
+      r2Url,
+      publicUrl: publicUrl || 'N/A',
+      bucket
+    });
+    
+    // Try public domain first (usually faster), fallback to direct endpoint
+    let response: Response | null = null;
+    let usedUrl = '';
+    
+    if (publicUrl) {
+      try {
+        response = await fetch(publicUrl);
+        usedUrl = publicUrl;
+        if (response.ok) {
+          console.log(`✅ Fetched from public domain: ${publicUrl}`);
+        } else {
+          console.warn(`⚠️ Public domain returned ${response.status}, trying direct endpoint...`);
+          response = null;
+        }
+      } catch (err) {
+        console.warn(`⚠️ Failed to fetch from public domain, trying direct endpoint:`, err);
+      }
+    }
+    
+    // Fallback to direct endpoint
+    if (!response || !response.ok) {
+      response = await fetch(r2Url);
+      usedUrl = r2Url;
+    }
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch file: HTTP ${response.status} ${response.statusText}`);
     }
 
-    // Convert stream to array buffer then to blob
-    const arrayBuffer = await response.Body.transformToByteArray();
-    const contentType = response.ContentType || 'application/octet-stream';
+    const blob = await response.blob();
+    const fileSize = blob.size;
     
-    return new Blob([arrayBuffer], { type: contentType });
+    console.log('📦 File fetched successfully:', {
+      key,
+      url: usedUrl,
+      size: fileSize,
+      sizeFormatted: `${(fileSize / 1024).toFixed(2)} KB`,
+      type: blob.type || 'unknown'
+    });
+    
+    // Validate file is not empty
+    if (fileSize === 0) {
+      throw new Error(`File "${key}" is empty (0 bytes). The file may not have been uploaded correctly or may have been corrupted.`);
+    }
+    
+    // Warn if file is suspiciously small (less than 10 bytes)
+    if (fileSize < 10) {
+      console.warn(`⚠️ File "${key}" is very small (${fileSize} bytes). This may indicate a problem.`);
+    }
+    
+    return blob;
   } catch (error: any) {
-    console.error('Error getting file from R2:', error);
+    console.error('❌ Error getting file from R2:', {
+      key,
+      error: error.message || error,
+      r2Url: `${R2_ENDPOINT}/${R2_BUCKET_NAME}/${key}`,
+      publicUrl: R2_PUBLIC_DOMAIN ? `${R2_PUBLIC_DOMAIN}/${key}` : 'N/A'
+    });
     throw new Error(`Failed to get file from R2: ${error.message || error}`);
   }
 };

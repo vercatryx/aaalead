@@ -6,28 +6,30 @@ import { StepGeneration } from './components/StepGeneration';
 import { Documents } from './components/Documents';
 import type { Inspector, Document } from './types/documents';
 import {
-  loadInspectors,
+  loadInspectorsAsync,
   saveInspectors,
-  loadGeneralDocumentTypes,
+  loadGeneralDocumentTypesAsync,
   saveGeneralDocumentTypes,
-  loadInspectorDocumentTypes,
+  loadInspectorDocumentTypesAsync,
   saveInspectorDocumentTypes,
   loadGeneralTypedDocuments,
   saveGeneralTypedDocuments,
   loadInspectorDocuments,
   saveInspectorDocuments,
   removeDocumentStorage,
-  loadGeneralVariables,
+  loadGeneralVariablesAsync,
   saveGeneralVariables,
-  loadInspectorVariableNames,
+  loadInspectorVariableNamesAsync,
   saveInspectorVariableNames,
   loadAllData,
   isStorageInitialized,
   initializeStorage,
+  apiCall,
 } from './utils/storage';
+import { getApiUrl } from './utils/apiConfig';
 
 // Types
-export type ReportType = 'XHR' | 'CERTIF' | null;
+export type ReportType = 'XHR' | null;
 export type AppStep = 'upload' | 'confirmation' | 'generation';
 
 export interface ExtractedData {
@@ -77,7 +79,7 @@ function App() {
   useEffect(() => {
     const initAndLoadData = async () => {
       try {
-        // Initialize storage from IndexedDB (no user interaction needed)
+        // Initialize storage from localStorage (works in incognito mode)
         await initializeStorage();
 
         // Load from storage
@@ -89,21 +91,45 @@ function App() {
 
         // Load individual data
         const [loadedInspectors, loadedGeneralTypes, loadedInspectorTypes, loadedGeneralDocs, loadedInspectorDocs, loadedGeneralVars, loadedInspectorVarNames] = await Promise.all([
-          Promise.resolve(loadInspectors()),
-          Promise.resolve(loadGeneralDocumentTypes()),
-          Promise.resolve(loadInspectorDocumentTypes()),
+          loadInspectorsAsync(),
+          loadGeneralDocumentTypesAsync(),
+          loadInspectorDocumentTypesAsync(),
           loadGeneralTypedDocuments(),
           loadInspectorDocuments(),
-          Promise.resolve(loadGeneralVariables()),
-          Promise.resolve(loadInspectorVariableNames()),
+          loadGeneralVariablesAsync(),
+          loadInspectorVariableNamesAsync(),
         ]);
 
         console.log('Loaded inspectors:', loadedInspectors);
+        
+        // Ensure default variables are always present
+        // 1. Ensure 'njdoh' is in inspectorVariableNames
+        let updatedInspectorVarNames = [...loadedInspectorVarNames];
+        if (!updatedInspectorVarNames.includes('njdoh')) {
+          updatedInspectorVarNames.push('njdoh');
+          await saveInspectorVariableNames(updatedInspectorVarNames);
+          console.log('✅ Added default inspector variable: njdoh');
+        }
+        // 2. Ensure 'license number' is in inspectorVariableNames
+        if (!updatedInspectorVarNames.includes('license number')) {
+          updatedInspectorVarNames.push('license number');
+          await saveInspectorVariableNames(updatedInspectorVarNames);
+          console.log('✅ Added default inspector variable: license number');
+        }
+        
+        // 2. Ensure 'njdca' is in generalVariables (with empty value if not set)
+        const updatedGeneralVars = new Map(loadedGeneralVars);
+        if (!updatedGeneralVars.has('njdca')) {
+          updatedGeneralVars.set('njdca', '');
+          await saveGeneralVariables(updatedGeneralVars);
+          console.log('✅ Added default general variable: njdca');
+        }
+        
         setInspectors(loadedInspectors);
         setGeneralDocumentTypes(loadedGeneralTypes);
         setInspectorDocumentTypes(loadedInspectorTypes);
-        setGeneralVariables(loadedGeneralVars);
-        setInspectorVariableNames(loadedInspectorVarNames);
+        setGeneralVariables(updatedGeneralVars);
+        setInspectorVariableNames(updatedInspectorVarNames);
         
         // Convert loaded documents back to Document type (files will need to be loaded separately)
         const generalDocsMap = new Map<string, Document>();
@@ -283,7 +309,7 @@ function App() {
   };
 
   const handleDeleteInspector = async (inspectorId: string) => {
-    // Delete associated document files from IndexedDB
+    // Delete associated document files from storage
     const inspectorDocs = inspectorDocuments.get(inspectorId) || [];
     for (const doc of inspectorDocs) {
       await removeDocumentStorage(doc.id);
@@ -310,15 +336,64 @@ function App() {
     setUploadingDocument({ type: 'inspector', inspectorId, documentType, fileName: file.name });
     
     try {
-      // Delete old document file if exists
-      const inspectorDocs = inspectorDocuments.get(inspectorId) || [];
-      const oldDoc = inspectorDocs.find(d => d.documentType === documentType);
-      if (oldDoc) {
-        await removeDocumentStorage(oldDoc.id);
+      // Check for existing document in database FIRST to reuse its ID
+      // This prevents UNIQUE constraint errors
+      // Use API directly instead of loadInspectorDocuments to avoid CORS issues
+      let documentId: string;
+      try {
+        const API_BASE = getApiUrl();
+        console.log(`🔍 Checking for existing document: inspectorId=${inspectorId}, documentType=${documentType}`);
+        const response = await fetch(`${API_BASE}/api/documents/inspector`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch documents: ${response.statusText}`);
+        }
+        const allInspectorDocs = await response.json();
+        console.log(`📋 Received inspector documents from API:`, Object.keys(allInspectorDocs));
+        const inspectorDocs = allInspectorDocs[inspectorId] || [];
+        console.log(`📋 Documents for inspector ${inspectorId}:`, inspectorDocs.map((d: any) => ({ id: d.id, documentType: d.documentType, fileName: d.fileName })));
+        console.log(`🔍 Looking for document with type "${documentType}" in:`, inspectorDocs.map((d: any) => `"${d.documentType}"`));
+        const existingDoc = inspectorDocs.find((d: any) => d.documentType === documentType);
+        console.log(`🔍 Search result:`, existingDoc ? `Found: ${existingDoc.id}` : 'Not found');
+        
+        if (existingDoc && existingDoc.id) {
+          documentId = existingDoc.id;
+          console.log(`✅ Found existing document in database, reusing ID ${documentId}`, existingDoc);
+          
+          // Don't delete old document file from R2 here - it will be replaced when we upload the new file
+          // The server will handle deleting the old database record
+          // This avoids CORS issues with direct R2 DELETE requests
+        } else {
+          documentId = Date.now().toString();
+          console.log(`📝 No existing document found for inspector ${inspectorId}, type "${documentType}", using new ID ${documentId}`);
+          console.log(`Available documents for this inspector:`, inspectorDocs);
+        }
+      } catch (error) {
+        // If we can't check, use a new ID
+        documentId = Date.now().toString();
+        console.warn(`⚠️ Could not check for existing document, using new ID ${documentId}:`, error);
+      }
+
+      // Validate file before creating document
+      console.log('📋 File validation before upload:', {
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        isFile: file instanceof File,
+        isBlob: file instanceof Blob,
+        hasName: !!file.name,
+        hasSize: file.size > 0
+      });
+
+      if (!file || file.size === 0) {
+        throw new Error(`File "${file.name || 'unknown'}" is empty (${file.size} bytes). Please select a valid file.`);
+      }
+
+      if (!file.name) {
+        throw new Error('File name is missing. Please select a file with a valid name.');
       }
 
       const document: Document = {
-        id: Date.now().toString(),
+        id: documentId, // Use the ID we determined (existing or new)
         fileName: file.name,
         file: file,
         uploadedAt: new Date(),
@@ -327,17 +402,45 @@ function App() {
         documentType: documentType,
       };
 
+      // Validate document before storing
+      console.log('📋 Document object created:', {
+        id: document.id,
+        fileName: document.fileName,
+        fileSize: document.file instanceof File ? document.file.size : document.file instanceof Blob ? document.file.size : 'unknown',
+        hasFile: !!document.file,
+        documentType: document.documentType
+      });
+
       // Store document - this will call storeFile which uploads to R2
+      // saveInspectorDocuments will use the same ID we determined
       const newMap = new Map(inspectorDocuments);
       const docs = newMap.get(inspectorId) || [];
       const filteredDocs = docs.filter(d => d.documentType !== documentType);
       const updated = [...filteredDocs, document];
       newMap.set(inspectorId, updated);
       
+      // Validate file again before calling saveInspectorDocuments
+      const docToSave = updated.find(d => d.id === documentId);
+      if (docToSave && docToSave.file) {
+        console.log('📋 File validation before saveInspectorDocuments:', {
+          fileName: docToSave.fileName,
+          fileSize: docToSave.file instanceof File ? docToSave.file.size : docToSave.file instanceof Blob ? docToSave.file.size : 'unknown',
+          hasFile: !!docToSave.file,
+          isFile: docToSave.file instanceof File,
+          isBlob: docToSave.file instanceof Blob
+        });
+      } else {
+        console.error('❌ File lost in Map! Document has no file:', docToSave);
+        throw new Error('File object was lost during processing. Please try uploading again.');
+      }
+      
       await saveInspectorDocuments(newMap);
       
+      // Update state with the new document (we already have the file, no need to reload from R2)
+      // This avoids CORS issues when trying to fetch from R2 directly
       setInspectorDocuments(newMap);
-      console.log(`✅ Successfully uploaded ${file.name} to R2`);
+      
+      console.log(`✅ Successfully uploaded ${file.name} to R2 with ID ${documentId}`);
     } catch (error: any) {
       const errorMessage = error?.message || 'Unknown error occurred';
       console.error('❌ Error uploading document:', error);
@@ -359,7 +462,7 @@ function App() {
   };
 
   const handleDeleteGeneralDocumentType = async (documentType: string) => {
-    // Delete document file from IndexedDB
+    // Delete document file from storage
     const doc = generalTypedDocuments.get(documentType);
     if (doc) {
       await removeDocumentStorage(doc.id);
@@ -392,7 +495,7 @@ function App() {
   };
 
   const handleDeleteInspectorDocumentType = async (documentType: string) => {
-    // Delete document files from IndexedDB for all inspectors
+    // Delete document files from storage for all inspectors
     for (const [inspectorId, docs] of inspectorDocuments.entries()) {
       const docsToDelete = docs.filter(d => d.documentType === documentType);
       for (const doc of docsToDelete) {
@@ -424,14 +527,41 @@ function App() {
     setUploadingDocument({ type: 'general-typed', documentType, fileName: file.name });
     
     try {
-      // Delete old document file if exists
-      const oldDoc = generalTypedDocuments.get(documentType);
-      if (oldDoc) {
-        await removeDocumentStorage(oldDoc.id);
+      // Check for existing document in database FIRST to reuse its ID
+      // This prevents UNIQUE constraint errors
+      // Use API directly instead of loadGeneralTypedDocuments to avoid CORS issues
+      let documentId: string;
+      try {
+        const API_BASE = getApiUrl();
+        const response = await fetch(`${API_BASE}/api/documents/general-typed`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch documents: ${response.statusText}`);
+        }
+        const allGeneralDocs = await response.json();
+        const existingDoc = allGeneralDocs[documentType];
+        
+        if (existingDoc && existingDoc.id) {
+          documentId = existingDoc.id;
+          console.log(`📋 Found existing document in database, reusing ID ${documentId}`);
+          
+          // Delete old document file from R2 (will be replaced with new file)
+          try {
+            await removeDocumentStorage(existingDoc.id);
+          } catch (error) {
+            console.warn('Error removing old document storage (continuing anyway):', error);
+          }
+        } else {
+          documentId = Date.now().toString();
+          console.log(`📝 No existing document found, using new ID ${documentId}`);
+        }
+      } catch (error) {
+        // If we can't check, use a new ID
+        documentId = Date.now().toString();
+        console.warn('Could not check for existing document, using new ID:', error);
       }
 
       const document: Document = {
-        id: Date.now().toString(),
+        id: documentId, // Use the ID we determined (existing or new)
         fileName: file.name,
         file: file,
         uploadedAt: new Date(),
@@ -441,15 +571,18 @@ function App() {
 
       // Replace existing document of this type (only one per type)
       // This will call storeFile which uploads to R2
+      // saveGeneralTypedDocuments will use the same ID we determined
       await saveGeneralTypedDocuments(new Map([[documentType, document]]));
       
+      // Update state with the new document (we already have the file, no need to reload from R2)
+      // This avoids CORS issues when trying to fetch from R2 directly
       setGeneralTypedDocuments(prev => {
         const newMap = new Map(prev);
         newMap.set(documentType, document);
         return newMap;
       });
       
-      console.log(`✅ Successfully uploaded ${file.name} to R2`);
+      console.log(`✅ Successfully uploaded ${file.name} to R2 with ID ${documentId}`);
     } catch (error: any) {
       const errorMessage = error?.message || 'Unknown error occurred';
       console.error('❌ Error uploading document:', error);
@@ -461,36 +594,51 @@ function App() {
   };
 
   const handleDeleteDocument = async (documentId: string, category: 'general-typed' | 'inspector') => {
-    // Delete file from IndexedDB
-    await removeDocumentStorage(documentId);
+    try {
+      // Delete from database first
+      await apiCall(`/api/documents/${documentId}`, {
+        method: 'DELETE',
+      });
+      console.log(`✅ Deleted document ${documentId} from database`);
 
-    if (category === 'general-typed') {
-      // Find and remove from general typed documents
-      setGeneralTypedDocuments(prev => {
-        const newMap = new Map(prev);
-        for (const [docType, doc] of newMap.entries()) {
-          if (doc.id === documentId) {
-            newMap.delete(docType);
-            break;
+      // Delete file from storage
+      try {
+        await removeDocumentStorage(documentId);
+      } catch (storageError) {
+        console.warn('Error removing document storage (continuing anyway):', storageError);
+      }
+
+      if (category === 'general-typed') {
+        // Find and remove from general typed documents
+        setGeneralTypedDocuments(prev => {
+          const newMap = new Map(prev);
+          for (const [docType, doc] of newMap.entries()) {
+            if (doc.id === documentId) {
+              newMap.delete(docType);
+              break;
+            }
           }
-        }
-        saveGeneralTypedDocuments(newMap).catch(console.error);
-        return newMap;
-      });
-    } else {
-      // Find and remove from inspector documents
-      setInspectorDocuments(prev => {
-        const newMap = new Map(prev);
-        for (const [inspectorId, docs] of newMap.entries()) {
-          const filteredDocs = docs.filter(d => d.id !== documentId);
-          if (filteredDocs.length !== docs.length) {
-            newMap.set(inspectorId, filteredDocs);
-            break;
+          saveGeneralTypedDocuments(newMap).catch(console.error);
+          return newMap;
+        });
+      } else {
+        // Find and remove from inspector documents
+        setInspectorDocuments(prev => {
+          const newMap = new Map(prev);
+          for (const [inspectorId, docs] of newMap.entries()) {
+            const filteredDocs = docs.filter(d => d.id !== documentId);
+            if (filteredDocs.length !== docs.length) {
+              newMap.set(inspectorId, filteredDocs);
+              break;
+            }
           }
-        }
-        saveInspectorDocuments(newMap).catch(console.error);
-        return newMap;
-      });
+          saveInspectorDocuments(newMap).catch(console.error);
+          return newMap;
+        });
+      }
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      alert(`Failed to delete document: ${error.message || error}`);
     }
   };
 
@@ -603,6 +751,7 @@ function App() {
               inspectors={inspectors}
               generalTypedDocuments={generalTypedDocuments}
               inspectorDocuments={inspectorDocuments}
+              generalVariables={generalVariables}
             />
           )}
 

@@ -24,6 +24,5 @@ export interface ReportConfig {
     id: string;
     name: string;
     templateUrl: string; // URL to the PDF template (e.g., /templates/file.pdf)
-    certifTemplateUrl?: string; // Optional URL to Certif Template (for XHR reports, prepended as first document)
     mappings: FieldMapping[];
 }

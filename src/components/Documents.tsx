@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Upload, FileText, Plus, X, Folder, UserPlus, Trash2, FolderOpen, Edit2, Hash, Loader2, AlertCircle } from 'lucide-react';
+import { Upload, FileText, Plus, X, Folder, UserPlus, Trash2, FolderOpen, Edit2, Hash, Loader2, AlertCircle, Lock } from 'lucide-react';
 import type { Inspector, Document } from '../types/documents';
+import { flattenPdf } from '../utils/pdfGenerator';
 
 interface DocumentsProps {
   inspectors: Inspector[];
@@ -69,6 +70,7 @@ export const Documents: React.FC<DocumentsProps> = ({
   const [newDocumentType, setNewDocumentType] = useState('');
   const [newVariable, setNewVariable] = useState<{ name: string; value: string } | null>(null);
   const [editingVariable, setEditingVariable] = useState<string | null>(null);
+  const [flatteningPdf, setFlatteningPdf] = useState(false);
 
   const handleAddInspector = () => {
     if (newInspectorName.trim()) {
@@ -85,6 +87,27 @@ export const Documents: React.FC<DocumentsProps> = ({
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'general-typed' | 'inspector', inspectorId?: string, documentType?: string) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Validate file before processing
+      console.log('📋 File selected in Documents component:', {
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        isFile: file instanceof File,
+        hasName: !!file.name
+      });
+
+      if (file.size === 0) {
+        alert(`Error: The file "${file.name}" is empty (0 bytes). Please select a valid file.`);
+        e.target.value = '';
+        return;
+      }
+
+      if (!file.name) {
+        alert('Error: The selected file has no name. Please select a valid file.');
+        e.target.value = '';
+        return;
+      }
+
       if (type === 'general-typed' && documentType) {
         onUploadGeneralTypedDocument(documentType, file);
       } else if (type === 'inspector' && inspectorId && documentType) {
@@ -92,7 +115,7 @@ export const Documents: React.FC<DocumentsProps> = ({
       }
       setUploadingTo(null);
     }
-    // Reset input
+    // Reset input AFTER processing (not before)
     e.target.value = '';
   };
 
@@ -111,6 +134,31 @@ export const Documents: React.FC<DocumentsProps> = ({
         onAddInspectorDocumentType(newDocumentType.trim());
       }
       setNewDocumentType('');
+    }
+  };
+
+  const handleFlattenPdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      e.target.value = '';
+      return;
+    }
+
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      alert('Please select a PDF file');
+      e.target.value = '';
+      return;
+    }
+
+    setFlatteningPdf(true);
+    try {
+      await flattenPdf(file);
+    } catch (error: any) {
+      alert(`Failed to flatten PDF: ${error.message || 'Unknown error'}`);
+      console.error('Flatten PDF error:', error);
+    } finally {
+      setFlatteningPdf(false);
+      e.target.value = '';
     }
   };
 
@@ -158,6 +206,21 @@ export const Documents: React.FC<DocumentsProps> = ({
             <h3 className="text-xs font-semibold text-slate-500 uppercase">Folders</h3>
           </div>
           <div className="flex-1 overflow-y-auto">
+            {/* Flatten PDF Button */}
+            <div className="p-2 border-b border-slate-100">
+              <label className="flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-colors bg-purple-50 text-purple-700 hover:bg-purple-100 cursor-pointer font-medium">
+                <Lock size={16} />
+                {flatteningPdf ? 'Flattening...' : 'Flatten PDF'}
+                <input
+                  type="file"
+                  accept=".pdf"
+                  onChange={handleFlattenPdf}
+                  disabled={flatteningPdf}
+                  className="hidden"
+                />
+              </label>
+            </div>
+            
             <div className="p-2">
               <button
                 onClick={() => {

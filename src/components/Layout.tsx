@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, Activity, FolderOpen } from 'lucide-react';
+import { FileText, FolderOpen } from 'lucide-react';
 import type { ReportType } from '../App';
 import { REPORTS } from '../config/reports';
 
@@ -18,13 +18,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, selectedReport, onSele
 
       {/* Sidebar */}
       <aside className="w-72 flex-shrink-0 bg-white border-r border-slate-200 flex flex-col p-6 z-20 shadow-sm">
-        <div className="mb-8 flex items-center gap-3">
-          <div className="p-2 bg-blue-600 rounded-lg shadow-sm">
-            <Activity size={20} className="text-white" />
-          </div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-            Lead Reports
-          </h1>
+        <div className="mb-8 flex items-center justify-center rounded-lg p-4" style={{ backgroundColor: 'rgb(25 36 50 / 90%)' }}>
+          <img 
+            src="/aaaleadlogo.png" 
+            alt="AAA Lead Logo" 
+            className="h-12 w-auto"
+          />
         </div>
 
         <div className="flex-1">

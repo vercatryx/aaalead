@@ -3,6 +3,7 @@ import { Download, CheckCircle, RotateCcw, AlertTriangle, CheckCircle2, FileText
 import type { ExtractedData } from '../App';
 import { generatePDFReport } from '../utils/pdfGenerator';
 import type { Inspector, Document } from '../types/documents';
+import { getFileFromR2, isR2Configured } from '../utils/r2Storage';
 
 interface StepGenerationProps {
     data: ExtractedData;
@@ -38,14 +39,115 @@ export const StepGeneration: React.FC<StepGenerationProps> = ({
                 hasGeneralDocs: !!generalTypedDocuments,
                 hasInspectorDocs: !!inspectorDocuments,
                 hasInspectors: !!inspectors,
-                hasGeneralVars: !!generalVariables
+                hasGeneralVars: !!generalVariables,
+                selectedInspectorId: data.selectedInspectorId,
+                licenseDocumentType: data.licenseDocumentType,
+                certificateDocumentType: data.certificateDocumentType
             });
+            
+            // Log inspector documents details
+            if (data.selectedInspectorId && inspectorDocuments) {
+                const inspectorDocs = inspectorDocuments.get(data.selectedInspectorId) || [];
+                console.log(`Inspector documents for ${data.selectedInspectorId}:`, inspectorDocs.map(doc => ({
+                    id: doc.id,
+                    fileName: doc.fileName,
+                    documentType: doc.documentType,
+                    hasFile: !!doc.file,
+                    fileType: doc.file?.type,
+                    fileSize: doc.file instanceof Blob ? doc.file.size : 'N/A',
+                    filePath: (doc as any).filePath
+                })));
+            }
+            
+            // Ensure documents have files before PDF generation
+            // Reload files from R2 if they're missing or empty
+            let documentsWithFiles = inspectorDocuments;
+            if (data.selectedInspectorId && inspectorDocuments) {
+                const inspectorDocs = inspectorDocuments.get(data.selectedInspectorId) || [];
+                const needsReload = inspectorDocs.some(doc => {
+                    const hasFilePath = !!(doc as any).filePath;
+                    const missingFile = !doc.file;
+                    const emptyFile = doc.file && doc.file.size === 0;
+                    return hasFilePath && (missingFile || emptyFile);
+                });
+                
+                if (needsReload) {
+                    console.log('⚠️ Some documents are missing files or have empty files, attempting to reload from R2...');
+                    const r2Configured = await isR2Configured();
+                    if (r2Configured) {
+                        const reloadedDocs = await Promise.all(inspectorDocs.map(async (doc) => {
+                            const filePath = (doc as any).filePath;
+                            const missingFile = !doc.file;
+                            const emptyFile = doc.file && doc.file.size === 0;
+                            
+                            if (filePath && (missingFile || emptyFile)) {
+                                try {
+                                    console.log(`📥 Reloading file for document:`, {
+                                        id: doc.id,
+                                        fileName: doc.fileName,
+                                        documentType: doc.documentType,
+                                        filePath: filePath,
+                                        currentFileSize: doc.file?.size || 0,
+                                        reason: missingFile ? 'missing' : 'empty'
+                                    });
+                                    
+                                    const file = await getFileFromR2(filePath);
+                                    
+                                    // Validate the reloaded file
+                                    if (!file || file.size === 0) {
+                                        throw new Error(`Reloaded file is empty (0 bytes)`);
+                                    }
+                                    
+                                    console.log(`✅ Reloaded file for document ${doc.id}: ${doc.fileName} (${file.size} bytes)`);
+                                    return { ...doc, file } as Document;
+                                } catch (error: any) {
+                                    console.error(`❌ Failed to reload file for document ${doc.id} (${doc.fileName}):`, {
+                                        error: error.message || error,
+                                        filePath: filePath
+                                    });
+                                    return doc;
+                                }
+                            }
+                            // Validate existing file is not empty
+                            if (doc.file && doc.file.size === 0) {
+                                console.warn(`⚠️ Document ${doc.id} (${doc.fileName}) has empty file but no filePath to reload`);
+                            }
+                            return doc as Document;
+                        }));
+                        
+                        const reloadedMap = new Map(inspectorDocuments);
+                        reloadedMap.set(data.selectedInspectorId, reloadedDocs);
+                        documentsWithFiles = reloadedMap;
+                        console.log('✅ Documents reloaded with files');
+                    } else {
+                        console.warn('⚠️ R2 not configured, cannot reload files');
+                    }
+                } else {
+                    // Even if reload isn't needed, validate all files
+                    console.log('🔍 Validating all document files...');
+                    inspectorDocs.forEach(doc => {
+                        const filePath = (doc as any).filePath;
+                        console.log(`📄 Document: ${doc.fileName}`, {
+                            id: doc.id,
+                            documentType: doc.documentType,
+                            hasFile: !!doc.file,
+                            fileSize: doc.file?.size || 0,
+                            filePath: filePath || 'N/A',
+                            fileType: doc.file?.type || 'N/A'
+                        });
+                        
+                        if (doc.file && doc.file.size === 0) {
+                            console.warn(`⚠️ Document ${doc.id} (${doc.fileName}) has empty file!`);
+                        }
+                    });
+                }
+            }
             
             await generatePDFReport(
                 data, 
                 reportType, 
                 generalTypedDocuments, 
-                inspectorDocuments, 
+                documentsWithFiles, 
                 inspectors, 
                 generalVariables
             );

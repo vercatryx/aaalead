@@ -1,33 +1,55 @@
 import type { Inspector, Document } from '../types/documents';
 import { uploadFileToR2, getFileFromR2, deleteFileFromR2, generateR2Key, isR2Configured } from './r2Storage';
+import { getApiUrl } from './apiConfig';
 
-// JSON storage structure
+const API_BASE = getApiUrl();
+
+// Helper function to make API calls
+export const apiCall = async (endpoint: string, options: RequestInit = {}) => {
+  const url = `${API_BASE}${endpoint}`;
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || error.message || `API call failed: ${response.statusText}`);
+  }
+
+  return response.json();
+};
+
+// JSON storage structure (for compatibility)
 export interface StorageData {
   inspectors: Array<{
     id: string;
     name: string;
-    variableValues?: Array<[string, string]>; // Stored as array of [key, value] pairs
+    variableValues?: Array<[string, string]>;
   }>;
   generalDocumentTypes: string[];
   inspectorDocumentTypes: string[];
-  generalVariables: Array<[string, string]>; // Array of [key, value] pairs
+  generalVariables: Array<[string, string]>;
   inspectorVariableNames: string[];
   generalTypedDocuments: Record<string, {
     id: string;
     fileName: string;
-    uploadedAt: string; // ISO string
+    uploadedAt: string;
     category: 'general' | 'general-typed' | 'inspector';
     documentType?: string;
-    filePath: string; // Path to the file
+    filePath: string;
   }>;
   inspectorDocuments: Record<string, Array<{
     id: string;
     fileName: string;
-    uploadedAt: string; // ISO string
+    uploadedAt: string;
     category: 'general' | 'general-typed' | 'inspector';
     inspectorId?: string;
     documentType?: string;
-    filePath: string; // Path to the file
+    filePath: string;
   }>>;
 }
 
@@ -42,343 +64,537 @@ const defaultStorageData: StorageData = {
   inspectorDocuments: {},
 };
 
-// IndexedDB setup
-const DB_NAME = 'LeadReportsDB';
-const DB_VERSION = 1;
-const STORE_NAME = 'storage';
-
-let db: IDBDatabase | null = null;
-
-// Initialize IndexedDB
-const initDB = (): Promise<IDBDatabase> => {
-  return new Promise((resolve, reject) => {
-    if (db) {
-      resolve(db);
-      return;
-    }
-
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onerror = () => {
-      reject(new Error('Failed to open IndexedDB'));
-    };
-
-    request.onsuccess = () => {
-      db = request.result;
-      resolve(db);
-    };
-
-    request.onupgradeneeded = (event) => {
-      const database = (event.target as IDBOpenDBRequest).result;
-      if (!database.objectStoreNames.contains(STORE_NAME)) {
-        database.createObjectStore(STORE_NAME);
-      }
-    };
-  });
-};
-
-// Get storage data from IndexedDB
-const getStorageFromDB = async (): Promise<StorageData> => {
-  try {
-    const database = await initDB();
-    return new Promise((resolve, reject) => {
-      const transaction = database.transaction([STORE_NAME], 'readonly');
-      const store = transaction.objectStore(STORE_NAME);
-      const request = store.get('data');
-
-      request.onsuccess = () => {
-        const data = request.result;
-        if (data) {
-          resolve(data as StorageData);
-        } else {
-          resolve(defaultStorageData);
-        }
-      };
-
-      request.onerror = () => {
-        reject(new Error('Failed to read from IndexedDB'));
-      };
-    });
-  } catch (error) {
-    console.error('Error getting storage from DB:', error);
-    return defaultStorageData;
-  }
-};
-
-// Save storage data to IndexedDB
-const saveStorageToDB = async (data: StorageData): Promise<void> => {
-  try {
-    const database = await initDB();
-    return new Promise((resolve, reject) => {
-      const transaction = database.transaction([STORE_NAME], 'readwrite');
-      const store = transaction.objectStore(STORE_NAME);
-      const request = store.put(data, 'data');
-
-      request.onsuccess = () => {
-        resolve();
-      };
-
-      request.onerror = () => {
-        reject(new Error('Failed to save to IndexedDB'));
-      };
-    });
-  } catch (error) {
-    console.error('Error saving storage to DB:', error);
-    throw error;
-  }
-};
-
-// Current storage data cache
-let currentStorageData: StorageData = defaultStorageData;
-
-// Initialize storage - automatically loads from IndexedDB
+// Initialize storage - loads from database via API
 export const initializeStorage = async (): Promise<void> => {
   try {
-    currentStorageData = await getStorageFromDB();
-    console.log('Storage initialized from IndexedDB');
+    // Test API connection
+    await apiCall('/api/data');
+    console.log('✅ Storage initialized from database');
   } catch (error) {
     console.error('Error initializing storage:', error);
-    currentStorageData = defaultStorageData;
-    await saveStorageToDB(defaultStorageData);
+    // Continue with defaults if API fails
   }
 };
 
 // Load all data from storage
 export const loadAllData = async (): Promise<StorageData> => {
   try {
-    currentStorageData = await getStorageFromDB();
-    return currentStorageData;
+    const data = await apiCall('/api/data');
+    return data;
   } catch (error) {
     console.error('Error in loadAllData:', error);
-    return currentStorageData;
+    return defaultStorageData;
   }
 };
 
-// Save all data to storage
+// Save all data to storage (not used with API, but kept for compatibility)
 export const saveAllData = async (data: StorageData): Promise<void> => {
-  currentStorageData = data;
-  await saveStorageToDB(data);
+  // With API, we don't save all at once - individual operations handle saves
+  console.warn('saveAllData called - this is not used with API storage');
 };
 
 // Check if storage is initialized
 export const isStorageInitialized = (): boolean => {
-  return db !== null;
+  // Always return true for API storage
+  return true;
 };
 
 // Clear all storage data (reset to default)
 export const clearAllStorage = async (): Promise<void> => {
-  currentStorageData = defaultStorageData;
-  await saveStorageToDB(defaultStorageData);
+  // This would require a special endpoint - for now, just log
+  console.warn('clearAllStorage called - not implemented for API storage');
 };
 
-// Inspectors
+// ==================== INSPECTORS ====================
+
 export const loadInspectors = (): Inspector[] => {
-  const data = currentStorageData;
-  if (!data || !data.inspectors) {
+  // This is synchronous in the old code, but we need async for API
+  // For now, return empty array - callers should use async version
+  return [];
+};
+
+export const loadInspectorsAsync = async (): Promise<Inspector[]> => {
+  try {
+    const inspectors = await apiCall('/api/inspectors');
+    return inspectors.map((inspector: any) => ({
+      id: inspector.id,
+      name: inspector.name,
+      variableValues: inspector.variableValues ? new Map(inspector.variableValues) : undefined,
+    }));
+  } catch (error) {
+    console.error('Error loading inspectors:', error);
     return [];
   }
-  return data.inspectors.map(inspector => ({
-    id: inspector.id,
-    name: inspector.name,
-    variableValues: inspector.variableValues ? new Map(inspector.variableValues) : undefined,
-  }));
 };
 
 export const saveInspectors = async (inspectors: Inspector[]): Promise<void> => {
-  const data = await loadAllData();
-  data.inspectors = inspectors.map(inspector => ({
-    id: inspector.id,
-    name: inspector.name,
-    variableValues: inspector.variableValues ? Array.from(inspector.variableValues.entries()) : undefined,
-  }));
-  await saveAllData(data);
+  // Get all existing inspectors first to check which ones exist
+  let existingInspectors: Inspector[] = [];
+  try {
+    existingInspectors = await apiCall('/api/inspectors');
+  } catch (error) {
+    console.warn('Error loading existing inspectors, will try to create/update anyway:', error);
+  }
+  
+  const existingIds = new Set(existingInspectors.map(i => i.id));
+  
+  // Save each inspector individually
+  for (const inspector of inspectors) {
+    try {
+      if (existingIds.has(inspector.id)) {
+        // Inspector exists, update it
+        await apiCall(`/api/inspectors/${inspector.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ name: inspector.name }),
+        });
+      } else {
+        // Inspector doesn't exist, create it
+        await apiCall('/api/inspectors', {
+          method: 'POST',
+          body: JSON.stringify({ id: inspector.id, name: inspector.name }),
+        });
+      }
+
+      // Save variable values
+      if (inspector.variableValues) {
+        for (const [varName, varValue] of inspector.variableValues.entries()) {
+          await apiCall(`/api/inspectors/${inspector.id}/variables/${encodeURIComponent(varName)}`, {
+            method: 'PUT',
+            body: JSON.stringify({ value: varValue }),
+          });
+        }
+      }
+    } catch (error) {
+      console.error(`Error saving inspector ${inspector.id}:`, error);
+      throw error; // Re-throw to surface the error
+    }
+  }
 };
 
-// Inspector Variable Names
+// ==================== INSPECTOR VARIABLE NAMES ====================
+
 export const loadInspectorVariableNames = (): string[] => {
-  return currentStorageData.inspectorVariableNames;
+  // Synchronous version - return empty, use async version
+  return [];
+};
+
+export const loadInspectorVariableNamesAsync = async (): Promise<string[]> => {
+  try {
+    return await apiCall('/api/inspector-variable-names');
+  } catch (error) {
+    console.error('Error loading inspector variable names:', error);
+    return [];
+  }
 };
 
 export const saveInspectorVariableNames = async (names: string[]): Promise<void> => {
-  const data = await loadAllData();
-  data.inspectorVariableNames = names;
-  await saveAllData(data);
+  // Get current names and sync
+  try {
+    const current = await apiCall('/api/inspector-variable-names');
+    const toAdd = names.filter(n => !current.includes(n));
+    const toDelete = current.filter(n => !names.includes(n));
+
+    for (const name of toAdd) {
+      await apiCall('/api/inspector-variable-names', {
+        method: 'POST',
+        body: JSON.stringify({ variableName: name }),
+      });
+    }
+
+    for (const name of toDelete) {
+      await apiCall(`/api/inspector-variable-names/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+      });
+    }
+  } catch (error) {
+    console.error('Error saving inspector variable names:', error);
+  }
 };
 
-// Document Types
+// ==================== DOCUMENT TYPES ====================
+
 export const loadGeneralDocumentTypes = (): string[] => {
-  return currentStorageData.generalDocumentTypes;
+  return [];
+};
+
+export const loadGeneralDocumentTypesAsync = async (): Promise<string[]> => {
+  try {
+    return await apiCall('/api/document-types/general');
+  } catch (error) {
+    console.error('Error loading general document types:', error);
+    return [];
+  }
 };
 
 export const saveGeneralDocumentTypes = async (types: string[]): Promise<void> => {
-  const data = await loadAllData();
-  data.generalDocumentTypes = types;
-  await saveAllData(data);
+  try {
+    const current = await apiCall('/api/document-types/general');
+    const toAdd = types.filter(t => !current.includes(t));
+    const toDelete = current.filter(t => !types.includes(t));
+
+    for (const type of toAdd) {
+      await apiCall('/api/document-types', {
+        method: 'POST',
+        body: JSON.stringify({ type, category: 'general' }),
+      });
+    }
+
+    for (const type of toDelete) {
+      await apiCall(`/api/document-types/${encodeURIComponent(type)}`, {
+        method: 'DELETE',
+      });
+    }
+  } catch (error) {
+    console.error('Error saving general document types:', error);
+  }
 };
 
 export const loadInspectorDocumentTypes = (): string[] => {
-  return currentStorageData.inspectorDocumentTypes.length > 0 
-    ? currentStorageData.inspectorDocumentTypes 
-    : ['License', 'Signature'];
+  return ['License', 'Signature'];
+};
+
+export const loadInspectorDocumentTypesAsync = async (): Promise<string[]> => {
+  try {
+    const types = await apiCall('/api/document-types/inspector');
+    return types.length > 0 ? types : ['License', 'Signature'];
+  } catch (error) {
+    console.error('Error loading inspector document types:', error);
+    return ['License', 'Signature'];
+  }
 };
 
 export const saveInspectorDocumentTypes = async (types: string[]): Promise<void> => {
-  const data = await loadAllData();
-  data.inspectorDocumentTypes = types;
-  await saveAllData(data);
+  try {
+    const current = await apiCall('/api/document-types/inspector');
+    const toAdd = types.filter(t => !current.includes(t));
+    const toDelete = current.filter(t => !types.includes(t));
+
+    for (const type of toAdd) {
+      await apiCall('/api/document-types', {
+        method: 'POST',
+        body: JSON.stringify({ type, category: 'inspector' }),
+      });
+    }
+
+    for (const type of toDelete) {
+      await apiCall(`/api/document-types/${encodeURIComponent(type)}`, {
+        method: 'DELETE',
+      });
+    }
+  } catch (error) {
+    console.error('Error saving inspector document types:', error);
+  }
 };
 
-// Documents - load files ONLY from R2 (not from IndexedDB)
+// ==================== DOCUMENTS ====================
+
 export const loadGeneralTypedDocuments = async (): Promise<Map<string, Omit<Document, 'file'> & { file?: Blob; filePath?: string }>> => {
-  const data = await loadAllData();
-  const map = new Map<string, Omit<Document, 'file'> & { file?: Blob; filePath?: string }>();
-  
-  for (const [docType, docData] of Object.entries(data.generalTypedDocuments)) {
-    // Only load if filePath is an R2 key (starts with "documents/")
-    // Skip old localStorage-based file paths
-    if (!docData.filePath || !docData.filePath.startsWith('documents/')) {
-      console.log(`Skipping document ${docData.id} - not in R2 storage (old localStorage data)`);
-      continue; // Skip old documents not in R2
-    }
-    
-    const doc: Omit<Document, 'file'> & { file?: Blob; filePath?: string } = {
-      id: docData.id,
-      fileName: docData.fileName,
-      uploadedAt: new Date(docData.uploadedAt),
-      category: docData.category,
-      documentType: docData.documentType,
-      filePath: docData.filePath,
-    };
-    
-    // Load file from R2 only
-    try {
-      const r2Configured = await isR2Configured();
-      if (r2Configured) {
-        const file = await getFileFromR2(docData.filePath);
-        doc.file = file;
-        console.log(`Loaded file from R2 for document ${docData.id}: ${docData.fileName}`);
-        map.set(docType, doc);
-      } else {
-        console.warn(`R2 not configured - skipping document ${docData.id}`);
-      }
-    } catch (error) {
-      console.warn(`Failed to load file from R2 for ${docData.id}:`, error);
-      // Don't add to map if file can't be loaded from R2
-    }
-  }
-    
-  return map;
-};
+  try {
+    const data = await apiCall('/api/documents/general-typed');
+    const map = new Map<string, Omit<Document, 'file'> & { file?: Blob; filePath?: string }>();
 
-export const saveGeneralTypedDocuments = async (documents: Map<string, Document>): Promise<void> => {
-  const data = await loadAllData();
-  data.generalTypedDocuments = {};
-  
-  for (const [docType, doc] of documents.entries()) {
-    // Store file and get path
-    const filePath = await storeFile(doc.file as File, doc.id);
-    
-    data.generalTypedDocuments[docType] = {
-      id: doc.id,
-      fileName: doc.fileName,
-      uploadedAt: doc.uploadedAt.toISOString(),
-      category: doc.category,
-      documentType: doc.documentType,
-      filePath: filePath,
-    };
-  }
-  
-  await saveAllData(data);
-};
-
-export const loadInspectorDocuments = async (): Promise<Map<string, (Omit<Document, 'file'> & { file?: Blob; filePath?: string })[]>> => {
-  const data = await loadAllData();
-  const map = new Map<string, (Omit<Document, 'file'> & { file?: Blob; filePath?: string })[]>();
-  
-  for (const [inspectorId, docs] of Object.entries(data.inspectorDocuments)) {
-    const loadedDocs: (Omit<Document, 'file'> & { file?: Blob; filePath?: string })[] = [];
-    
-    for (const docData of docs) {
-      // Only load if filePath is an R2 key (starts with "documents/")
-      // Skip old localStorage-based file paths
-      if (!docData.filePath || !docData.filePath.startsWith('documents/')) {
-        console.log(`Skipping document ${docData.id} - not in R2 storage (old localStorage data)`);
-        continue; // Skip old documents not in R2
+    for (const [docType, docData] of Object.entries(data)) {
+      const doc = docData as any;
+      if (!doc.filePath || !doc.filePath.startsWith('documents/')) {
+        console.warn(`⚠️ Document ${doc.id} (${doc.fileName}) has invalid or missing filePath: "${doc.filePath}". This document may have been uploaded before R2 storage was configured, or the filePath was lost. The document record exists in the database but the file link is broken.`);
+        // Continue to next document - don't load this one
+        continue;
       }
-      
-      const doc: Omit<Document, 'file'> & { file?: Blob; filePath?: string } = {
-        id: docData.id,
-        fileName: docData.fileName,
-        uploadedAt: new Date(docData.uploadedAt),
-        category: docData.category,
-        inspectorId: docData.inspectorId,
-        documentType: docData.documentType,
-        filePath: docData.filePath,
+
+      const document: Omit<Document, 'file'> & { file?: Blob; filePath?: string } = {
+        id: doc.id,
+        fileName: doc.fileName,
+        uploadedAt: new Date(doc.uploadedAt),
+        category: doc.category,
+        documentType: doc.documentType,
+        filePath: doc.filePath,
       };
-      
-      // Load file from R2 only
+
       try {
         const r2Configured = await isR2Configured();
         if (r2Configured) {
-          const file = await getFileFromR2(docData.filePath);
-          doc.file = file;
-          console.log(`Loaded file from R2 for document ${docData.id}: ${docData.fileName}`);
-          loadedDocs.push(doc);
+          const file = await getFileFromR2(doc.filePath);
+          document.file = file;
+          console.log(`Loaded file from R2 for document ${doc.id}: ${doc.fileName}`);
+          map.set(docType, document);
         } else {
-          console.warn(`R2 not configured - skipping document ${docData.id}`);
+          console.warn(`R2 not configured - skipping document ${doc.id}`);
         }
       } catch (error) {
-        console.warn(`Failed to load file from R2 for ${docData.id}:`, error);
-        // Don't add to array if file can't be loaded from R2
+        console.warn(`Failed to load file from R2 for ${doc.id}:`, error);
       }
     }
-    
-    if (loadedDocs.length > 0) {
-      map.set(inspectorId, loadedDocs);
+
+    return map;
+  } catch (error) {
+    console.error('Error loading general typed documents:', error);
+    return new Map();
+  }
+};
+
+export const saveGeneralTypedDocuments = async (documents: Map<string, Document>): Promise<void> => {
+  for (const [docType, doc] of documents.entries()) {
+    try {
+      // Use the ID from the document (it was already determined by checking the database in handleUploadGeneralTypedDocument)
+      // This prevents UNIQUE constraint errors
+      const documentIdToUse = doc.id;
+      console.log(`📝 Using document ID ${documentIdToUse} for type "${docType}"`);
+
+      // Store file and get path (use the ID we determined above for consistent R2 key)
+      const filePath = await storeFile(doc.file as File, documentIdToUse);
+      console.log(`📤 Uploaded file to R2: ${filePath}`);
+
+      // Save document record to database (server will handle deleting old records with same type)
+      await apiCall('/api/documents', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: documentIdToUse,
+          fileName: doc.fileName,
+          filePath: filePath,
+          category: doc.category,
+          documentType: doc.documentType,
+        }),
+      });
+      
+      console.log(`✅ Successfully saved general typed document "${docType}" with ID ${documentIdToUse} and filePath ${filePath}`);
+    } catch (error) {
+      console.error(`❌ Error saving general typed document "${docType}":`, error);
+      throw error; // Re-throw to surface the error
     }
   }
-  
-  return map;
+};
+
+export const loadInspectorDocuments = async (): Promise<Map<string, (Omit<Document, 'file'> & { file?: Blob; filePath?: string })[]>> => {
+  try {
+    const data = await apiCall('/api/documents/inspector');
+    const map = new Map<string, (Omit<Document, 'file'> & { file?: Blob; filePath?: string })[]>();
+
+    for (const [inspectorId, docs] of Object.entries(data)) {
+      const documents = docs as any[];
+      const loadedDocs: (Omit<Document, 'file'> & { file?: Blob; filePath?: string })[] = [];
+
+      for (const docData of documents) {
+        if (!docData.filePath || !docData.filePath.startsWith('documents/')) {
+          console.warn(`⚠️ Document ${docData.id} (${docData.fileName}) has invalid or missing filePath: "${docData.filePath}". This document may have been uploaded before R2 storage was configured, or the filePath was lost. The document record exists in the database but the file link is broken.`);
+          // Continue to next document - don't load this one
+          continue;
+        }
+
+        const doc: Omit<Document, 'file'> & { file?: Blob; filePath?: string } = {
+          id: docData.id,
+          fileName: docData.fileName,
+          uploadedAt: new Date(docData.uploadedAt),
+          category: docData.category,
+          inspectorId: docData.inspectorId,
+          documentType: docData.documentType,
+          filePath: docData.filePath,
+        };
+
+        // Always add document to the list, even if file loading fails
+        // This ensures documents in the database are visible
+        try {
+          const r2Configured = await isR2Configured();
+          if (r2Configured && docData.filePath) {
+            try {
+              console.log(`📥 Loading file from R2 for document:`, {
+                id: docData.id,
+                fileName: docData.fileName,
+                documentType: docData.documentType,
+                filePath: docData.filePath
+              });
+              
+              const file = await getFileFromR2(docData.filePath);
+              
+              // Validate file is not empty
+              if (!file || file.size === 0) {
+                throw new Error(`File loaded but is empty (0 bytes)`);
+              }
+              
+              doc.file = file;
+              console.log(`✅ Loaded file from R2 for document ${docData.id}: ${docData.fileName} (${file.size} bytes)`);
+            } catch (fileError: any) {
+              console.error(`❌ Failed to load file from R2 for ${docData.id} (${docData.fileName}):`, {
+                error: fileError.message || fileError,
+                filePath: docData.filePath
+              });
+              // Document is still added without the file - user can see it exists and can delete/reupload
+            }
+          } else {
+            console.warn(`⚠️ R2 not configured or missing filePath - document ${docData.id} will be shown without file`, {
+              r2Configured,
+              hasFilePath: !!docData.filePath,
+              filePath: docData.filePath || 'N/A'
+            });
+          }
+        } catch (error: any) {
+          console.warn(`⚠️ Error processing document ${docData.id}, but keeping it in list:`, error.message || error);
+        }
+        
+        // Always add the document, even if file loading failed
+        loadedDocs.push(doc);
+      }
+
+      if (loadedDocs.length > 0) {
+        map.set(inspectorId, loadedDocs);
+      }
+    }
+
+    return map;
+  } catch (error) {
+    console.error('Error loading inspector documents:', error);
+    return new Map();
+  }
 };
 
 export const saveInspectorDocuments = async (documents: Map<string, Document[]>): Promise<void> => {
-  const data = await loadAllData();
-  data.inspectorDocuments = {};
-    
-    for (const [inspectorId, docs] of documents.entries()) {
-    data.inspectorDocuments[inspectorId] = await Promise.all(
-      docs.map(async (doc) => {
-        const filePath = await storeFile(doc.file as File, doc.id);
-        return {
-          id: doc.id,
+  for (const [inspectorId, docs] of documents.entries()) {
+    for (const doc of docs) {
+      try {
+        // Validate required fields before doing anything
+        if (!doc.inspectorId || !doc.inspectorId.trim()) {
+          throw new Error(`Inspector ID is missing or empty for document ${doc.id}. Cannot save inspector document without an inspector.`);
+        }
+        if (!doc.documentType || !doc.documentType.trim()) {
+          throw new Error(`Document type is missing or empty for document ${doc.id}. Cannot save document without a document type.`);
+        }
+
+        // Verify inspector exists before proceeding
+        try {
+          const inspector = await apiCall(`/api/inspectors/${doc.inspectorId}`);
+          if (!inspector || !inspector.id) {
+            throw new Error(`Inspector with ID "${doc.inspectorId}" does not exist. Please create the inspector first.`);
+          }
+          console.log(`✅ Verified inspector "${doc.inspectorId}" exists: ${inspector.name}`);
+        } catch (error: any) {
+          if (error.message && error.message.includes('does not exist')) {
+            throw error; // Re-throw our custom error
+          }
+          console.warn(`⚠️ Could not verify inspector ${doc.inspectorId}, but continuing:`, error);
+        }
+
+        // Use the ID from the document (it was already determined by checking the database in handleUploadInspectorDocument)
+        // This prevents UNIQUE constraint errors
+        const documentIdToUse = doc.id;
+        console.log(`📝 Using document ID ${documentIdToUse} for inspector ${inspectorId}, type "${doc.documentType}"`);
+
+        // Validate file before storing
+        if (!doc.file) {
+          throw new Error(`Document ${doc.id} (${doc.fileName}) has no file object. Cannot upload without a file.`);
+        }
+
+        // Check if file is a File or Blob
+        if (!(doc.file instanceof File || doc.file instanceof Blob)) {
+          throw new Error(`Document ${doc.id} (${doc.fileName}) has an invalid file object. Expected File or Blob, got ${typeof doc.file}.`);
+        }
+
+        // Validate file size
+        const fileSize = doc.file.size;
+        console.log(`📋 File validation in saveInspectorDocuments:`, {
           fileName: doc.fileName,
-          uploadedAt: doc.uploadedAt.toISOString(),
-          category: doc.category,
+          fileSize: fileSize,
+          fileType: doc.file.type || 'unknown',
+          isFile: doc.file instanceof File,
+          isBlob: doc.file instanceof Blob,
+          hasName: doc.file instanceof File ? !!doc.file.name : false,
+          actualFileName: doc.file instanceof File ? doc.file.name : 'N/A (Blob)'
+        });
+
+        if (fileSize === 0) {
+          throw new Error(`Document ${doc.id} (${doc.fileName}) has an empty file (0 bytes). The file may have been corrupted during upload. Please try uploading again.`);
+        }
+
+        // Get file name - use doc.fileName if file.name is missing (for Blobs)
+        const fileName = (doc.file instanceof File && doc.file.name) ? doc.file.name : doc.fileName;
+        if (!fileName || fileName === 'undefined') {
+          throw new Error(`Document ${doc.id} has no file name. Cannot generate R2 key without a file name.`);
+        }
+
+        // Store file and get path (use the ID we determined above for consistent R2 key)
+        // Convert Blob to File if needed for storeFile
+        let fileToUpload: File;
+        if (doc.file instanceof File) {
+          fileToUpload = doc.file;
+        } else {
+          // Convert Blob to File
+          fileToUpload = new File([doc.file], fileName, { type: doc.file.type || 'application/octet-stream' });
+        }
+
+        const filePath = await storeFile(fileToUpload, documentIdToUse);
+        console.log(`📤 Uploaded file to R2: ${filePath}`);
+
+        // Save document record to database (server will handle deleting old records with same inspectorId and type)
+        console.log(`💾 Saving document to database:`, {
+          id: documentIdToUse,
           inspectorId: doc.inspectorId,
           documentType: doc.documentType,
-          filePath: filePath,
-        };
-      })
-    );
+          category: doc.category
+        });
+        
+        await apiCall('/api/documents', {
+          method: 'POST',
+          body: JSON.stringify({
+            id: documentIdToUse,
+            fileName: doc.fileName,
+            filePath: filePath,
+            category: doc.category,
+            inspectorId: doc.inspectorId,
+            documentType: doc.documentType,
+          }),
+        });
+        
+        console.log(`✅ Successfully saved inspector document for ${inspectorId}, type "${doc.documentType}" with ID ${documentIdToUse} and filePath ${filePath}`);
+      } catch (error) {
+        console.error(`❌ Error saving inspector document ${doc.id}:`, error);
+        throw error; // Re-throw to surface the error
+      }
+    }
   }
-  
-  await saveAllData(data);
 };
 
-// General Variables
+// ==================== GENERAL VARIABLES ====================
+
 export const loadGeneralVariables = (): Map<string, string> => {
-  return new Map(currentStorageData.generalVariables);
+  return new Map();
+};
+
+export const loadGeneralVariablesAsync = async (): Promise<Map<string, string>> => {
+  try {
+    const variables = await apiCall('/api/general-variables');
+    return new Map(variables);
+  } catch (error) {
+    console.error('Error loading general variables:', error);
+    return new Map();
+  }
 };
 
 export const saveGeneralVariables = async (variables: Map<string, string>): Promise<void> => {
-  const data = await loadAllData();
-  data.generalVariables = Array.from(variables.entries());
-  await saveAllData(data);
+  try {
+    const current = await apiCall('/api/general-variables');
+    const currentMap = new Map(current);
+    const toAdd = Array.from(variables.entries()).filter(([k]) => !currentMap.has(k));
+    const toUpdate = Array.from(variables.entries()).filter(([k, v]) => currentMap.get(k) !== v);
+    const toDelete = Array.from(currentMap.keys()).filter(k => !variables.has(k));
+
+    for (const [name, value] of [...toAdd, ...toUpdate]) {
+      await apiCall(`/api/general-variables/${encodeURIComponent(name)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ value }),
+      });
+    }
+
+    for (const name of toDelete) {
+      await apiCall(`/api/general-variables/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+      });
+    }
+  } catch (error) {
+    console.error('Error saving general variables:', error);
+  }
 };
 
-// Store file and return R2 key
+// ==================== FILE STORAGE ====================
+
 export const storeFile = async (file: File, docId: string): Promise<string> => {
-  // Debug: Check what env vars are available
   const envCheck = {
     REACT_APP_R2_ENDPOINT: process.env.REACT_APP_R2_ENDPOINT ? '✅' : '❌',
     REACT_APP_R2_ACCESS_KEY_ID: process.env.REACT_APP_R2_ACCESS_KEY_ID ? '✅' : '❌',
@@ -386,8 +602,7 @@ export const storeFile = async (file: File, docId: string): Promise<string> => {
     REACT_APP_R2_BUCKET_NAME: process.env.REACT_APP_R2_BUCKET_NAME ? '✅' : '❌',
   };
   console.log('🔍 Environment Variables Check in storeFile:', envCheck);
-  console.log('🔍 All REACT_APP_R2_* env vars:', Object.keys(process.env).filter(k => k.startsWith('REACT_APP_R2')));
-  
+
   const r2Configured = await isR2Configured();
   if (!r2Configured) {
     const missingVars: string[] = [];
@@ -395,7 +610,7 @@ export const storeFile = async (file: File, docId: string): Promise<string> => {
     if (!process.env.REACT_APP_R2_ACCESS_KEY_ID) missingVars.push('REACT_APP_R2_ACCESS_KEY_ID');
     if (!process.env.REACT_APP_R2_SECRET_ACCESS_KEY) missingVars.push('REACT_APP_R2_SECRET_ACCESS_KEY');
     if (!process.env.REACT_APP_R2_BUCKET_NAME) missingVars.push('REACT_APP_R2_BUCKET_NAME');
-    
+
     throw new Error(
       '❌ R2 storage is not configured!\n\n' +
       'Missing environment variables:\n' +
@@ -409,68 +624,62 @@ export const storeFile = async (file: File, docId: string): Promise<string> => {
       'Environment variables are only loaded when the dev server starts.'
     );
   }
-  
+
   try {
-    const r2Key = generateR2Key(docId, file.name);
-    console.log(`📤 Uploading file to R2: ${file.name} -> ${r2Key}`);
+    // Validate file has a name - use fallback if missing
+    const fileName = file.name || (file instanceof File ? 'unnamed-file' : 'blob-file');
+    if (!fileName || fileName === 'undefined') {
+      throw new Error('File name is missing or invalid. Cannot upload file without a name.');
+    }
+    
+    // Validate file size
+    if (file.size === 0) {
+      throw new Error('File is empty (0 bytes). Cannot upload empty file.');
+    }
+    
+    const r2Key = generateR2Key(docId, fileName);
+    console.log(`📤 Uploading file to R2: ${fileName} -> ${r2Key}`);
     await uploadFileToR2(file, r2Key);
     console.log(`✅ Successfully uploaded to R2: ${r2Key}`);
     return r2Key;
   } catch (error: any) {
     console.error('❌ Error storing file to R2:', error);
-    // Re-throw the error with context
+    const fileName = file.name || 'unknown file';
     throw new Error(
-      `Failed to store file "${file.name}" to R2 storage:\n\n${error.message || error}\n\n` +
+      `Failed to store file "${fileName}" to R2 storage:\n\n${error.message || error}\n\n` +
       'File upload has been aborted. Please check your R2 configuration and try again.'
     );
   }
 };
 
-// Remove document storage from R2 and JSON
 export const removeDocumentStorage = async (docId: string): Promise<void> => {
-  const data = await loadAllData();
-  let filePathToDelete: string | null = null;
-  
-  // Find and remove from general documents
-  for (const [docType, docData] of Object.entries(data.generalTypedDocuments)) {
-    if (docData.id === docId) {
-      filePathToDelete = docData.filePath;
-      delete data.generalTypedDocuments[docType];
-      await saveAllData(data);
-      break;
-    }
-  }
-  
-  // Find and remove from inspector documents
-  if (!filePathToDelete) {
-    for (const [inspectorId, docs] of Object.entries(data.inspectorDocuments)) {
-      const docToDelete = docs.find(doc => doc.id === docId);
-      if (docToDelete) {
-        filePathToDelete = docToDelete.filePath;
-        const filtered = docs.filter(doc => doc.id !== docId);
-        data.inspectorDocuments[inspectorId] = filtered;
-        await saveAllData(data);
-        break;
+  try {
+    // Get document info first
+    const doc = await apiCall(`/api/documents/${docId}`).catch(() => null);
+    
+    if (doc && doc.filePath && doc.filePath.startsWith('documents/')) {
+      try {
+        const r2Configured = await isR2Configured();
+        if (r2Configured) {
+          await deleteFileFromR2(doc.filePath);
+          console.log(`Deleted file from R2: ${doc.filePath}`);
+        }
+      } catch (error) {
+        console.warn(`Failed to delete file from R2: ${doc.filePath}`, error);
       }
     }
-  }
-  
-  // Delete file from R2 if configured and filePath is an R2 key
-  if (filePathToDelete && filePathToDelete.startsWith('documents/')) {
-    try {
-      const r2Configured = await isR2Configured();
-      if (r2Configured) {
-        await deleteFileFromR2(filePathToDelete);
-        console.log(`Deleted file from R2: ${filePathToDelete}`);
-      }
-    } catch (error) {
-      console.warn(`Failed to delete file from R2: ${filePathToDelete}`, error);
-      // Continue even if R2 deletion fails
-    }
+
+    // Delete from database
+    await apiCall(`/api/documents/${docId}`, {
+      method: 'DELETE',
+    });
+  } catch (error) {
+    console.error('Error removing document storage:', error);
   }
 };
 
-// Export storage data to JSON file (for backup)
+// ==================== EXPORT/IMPORT (for backup) ====================
+
 export const exportStorageData = async (): Promise<void> => {
   const data = await loadAllData();
   const json = JSON.stringify(data, null, 2);
@@ -485,20 +694,28 @@ export const exportStorageData = async (): Promise<void> => {
   URL.revokeObjectURL(url);
 };
 
-// Import storage data from JSON file
 export const importStorageData = async (file: File): Promise<void> => {
   try {
     const text = await file.text();
     const data = JSON.parse(text) as StorageData;
-    
-    // Validate the data structure
+
     if (!data.inspectors || !data.generalDocumentTypes || !data.inspectorDocumentTypes) {
       throw new Error('Invalid storage file format');
     }
-    
-    await saveAllData(data);
-    // Reload current storage data
-    currentStorageData = data;
+
+    // Import all data
+    await saveInspectors(data.inspectors.map(i => ({
+      id: i.id,
+      name: i.name,
+      variableValues: i.variableValues ? new Map(i.variableValues) : undefined,
+    })));
+    await saveGeneralDocumentTypes(data.generalDocumentTypes);
+    await saveInspectorDocumentTypes(data.inspectorDocumentTypes);
+    await saveGeneralVariables(new Map(data.generalVariables));
+    await saveInspectorVariableNames(data.inspectorVariableNames);
+
+    // Documents would need to be re-uploaded since we only store metadata
+    console.log('Note: Documents need to be re-uploaded after import');
   } catch (error) {
     console.error('Error importing storage file:', error);
     throw error;
