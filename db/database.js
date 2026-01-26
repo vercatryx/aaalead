@@ -9,6 +9,7 @@ const { Pool } = pg;
 
 let pool = null;
 let dbInitialized = false;
+let initializationPromise = null; // Track ongoing initialization to prevent race conditions
 
 // Connection configuration from Supabase
 // Using Session Pooler connection string for IPv4 compatibility
@@ -18,17 +19,26 @@ export function getConnectionConfig() {
   const PROJECT_REF = process.env.SUPABASE_PROJECT_REF;
   const PASSWORD = process.env.SUPABASE_DB_PASSWORD;
   
-  // Auto-detect Vercel environment (Vercel doesn't support IPv6, so we must use pooler)
+  // Auto-detect Vercel environment
   const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
   
-  // Default to direct connection (faster and more reliable) for local development
-  // Use pooler for Vercel (IPv4 compatible) or if explicitly set
-  // Set SUPABASE_USE_POOLER=true to force pooler, SUPABASE_USE_POOLER=false to force direct
+  // Connection strategy:
+  // - Local: Default to direct connection (faster, works with IPv6)
+  // - Vercel: Default to pooler (IPv4), but can try direct if SUPABASE_USE_DIRECT=true
+  //   Note: Vercel serverless functions may not support IPv6, so direct may fail
+  //   The code will automatically fall back to pooler if direct fails
+  // - Set SUPABASE_USE_POOLER=true to force pooler
+  // - Set SUPABASE_USE_DIRECT=true to force direct (will try even on Vercel)
+  // - Set SUPABASE_USE_DIRECT=false to disable direct (will use pooler)
+  const forceDirect = process.env.SUPABASE_USE_DIRECT === 'true' || process.env.SUPABASE_USE_DIRECT === '1';
   const forcePooler = process.env.SUPABASE_USE_POOLER === 'true' || process.env.SUPABASE_USE_POOLER === '1';
-  const forceDirect = process.env.SUPABASE_USE_POOLER === 'false' || process.env.SUPABASE_USE_POOLER === '0';
+  const disableDirect = process.env.SUPABASE_USE_DIRECT === 'false' || process.env.SUPABASE_USE_DIRECT === '0';
   
-  // Use pooler if on Vercel OR if explicitly forced, otherwise use direct connection
-  const useDirectConnection = !isVercel && !forcePooler;
+  // Use direct connection if:
+  // - Not disabled AND
+  // - (Explicitly forced OR (not on Vercel AND not forcing pooler))
+  // This allows trying direct on Vercel if explicitly enabled
+  const useDirectConnection = !disableDirect && (forceDirect || (!isVercel && !forcePooler));
   
   // If DATABASE_URL is provided, use it directly
   if (process.env.DATABASE_URL) {
@@ -68,25 +78,39 @@ export function getConnectionConfig() {
       allowExitOnIdle: true,
     };
   } else {
-    // Use Session Pooler connection string (IPv4 compatible, supports prepared statements)
-    // Format: postgresql://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
+    // Use Transaction Pooler connection string (IPv4 compatible, better for serverless)
+    // Format: postgresql://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres?pgbouncer=true
+    // Port 6543 = Transaction mode (better for serverless, no prepared statements)
+    // Port 5432 = Session mode (requires prepared statements, can have issues with serverless)
     const region = process.env.SUPABASE_POOLER_REGION || 'us-west-2';
-    connectionString = `postgresql://postgres.${PROJECT_REF}:${encodeURIComponent(PASSWORD)}@aws-0-${region}.pooler.supabase.com:5432/postgres`;
-    connectionType = 'Session Pooler (IPv4 compatible)';
+    const useTransactionMode = process.env.SUPABASE_USE_TRANSACTION_MODE !== 'false';
+    
+    if (useTransactionMode) {
+      // Transaction mode (port 6543) - better for serverless, no prepared statements needed
+      connectionString = `postgresql://postgres.${PROJECT_REF}:${encodeURIComponent(PASSWORD)}@aws-0-${region}.pooler.supabase.com:6543/postgres?pgbouncer=true`;
+      connectionType = 'Transaction Pooler (IPv4 compatible, serverless-optimized)';
+    } else {
+      // Session mode (port 5432) - requires prepared statements
+      connectionString = `postgresql://postgres.${PROJECT_REF}:${encodeURIComponent(PASSWORD)}@aws-0-${region}.pooler.supabase.com:5432/postgres`;
+      connectionType = 'Session Pooler (IPv4 compatible)';
+    }
+    
+    // Use same pool configuration for both local and Vercel for consistency
     poolConfig = {
-      max: 10, // Reduced for Session Pooler limits
-      idleTimeoutMillis: 10000,
-      connectionTimeoutMillis: 5000,
-      allowExitOnIdle: true,
+      max: 1, // Single connection (consistent for both local and serverless)
+      idleTimeoutMillis: 30000, // Keep connection alive longer
+      connectionTimeoutMillis: 15000, // Longer timeout for consistency
+      allowExitOnIdle: false, // Don't close connections on idle
     };
   }
   
-  // Log which connection string is being used (for debugging)
-  if (isVercel) {
-    console.log('🌐 Vercel environment detected - using pooler connection (IPv4 compatible)');
+  // Log connection type only in development or if explicitly enabled
+  if (process.env.NODE_ENV === 'development' || process.env.SUPABASE_DEBUG === 'true') {
+    if (isVercel) {
+      console.log('🌐 Vercel environment detected');
+    }
+    console.log(`🔧 Using ${connectionType}`);
   }
-  console.log(`🔧 Using ${connectionType}`);
-  console.log(`🔧 Connection: ${useDirectConnection ? 'Direct (faster, IPv6)' : 'Pooler (IPv4 compatible)'}`);
   
   return {
     connectionString: connectionString,
@@ -98,70 +122,223 @@ export function getConnectionConfig() {
 }
 
 async function initializeDatabaseModule() {
-  if (dbInitialized) {
-    return pool !== null;
-  }
-  dbInitialized = true;
-  
-  try {
-    // Debug: Log environment variables (without exposing secrets)
-    console.log('🔍 Environment variables check:', {
-      hasDATABASE_URL: !!process.env.DATABASE_URL,
-      hasSUPABASE_PROJECT_REF: !!process.env.SUPABASE_PROJECT_REF,
-      hasSUPABASE_DB_PASSWORD: !!process.env.SUPABASE_DB_PASSWORD,
-      SUPABASE_PROJECT_REF_length: process.env.SUPABASE_PROJECT_REF?.length || 0,
-      SUPABASE_DB_PASSWORD_length: process.env.SUPABASE_DB_PASSWORD?.length || 0,
-    });
-    
-    const config = getConnectionConfig();
-    console.log('🔌 Attempting to connect to PostgreSQL database...');
-    
-    const masked = config.connectionString.replace(/:[^:@]+@/, ':****@');
-    console.log('🔌 Using connection string (masked):', masked);
-    
-    // Log connection type
-    if (config.connectionString.includes('db.') && config.connectionString.includes('.supabase.co')) {
-      console.log('✅ Using direct connection (faster, IPv6)');
-    } else if (config.connectionString.includes('pooler.supabase.com')) {
-      const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
-      if (isVercel) {
-        console.log('✅ Using pooler connection (IPv4 compatible) - Vercel detected');
-      } else {
-        console.log('✅ Using pooler connection (IPv4 compatible)');
+  // If already initialized and pool exists, return success
+  if (dbInitialized && pool !== null) {
+    // Test if pool is still valid
+    try {
+      const testClient = await pool.connect();
+      testClient.release();
+      return true;
+    } catch (error) {
+      // Pool is invalid, reset and reinitialize
+      if (process.env.NODE_ENV === 'development' || process.env.SUPABASE_DEBUG === 'true') {
+        console.warn('⚠️ Database pool invalid, reinitializing...');
       }
+      await resetDatabaseConnection();
+    }
+  }
+  
+  // If initialization is already in progress, wait for it
+  if (initializationPromise) {
+    return initializationPromise;
+  }
+  
+  // Start new initialization
+  initializationPromise = (async () => {
+    try {
+      dbInitialized = true;
+      return await performInitialization();
+    } finally {
+      initializationPromise = null;
+    }
+  })();
+  
+  return initializationPromise;
+}
+
+// Reset database connection state (useful for recovery after errors)
+export async function resetDatabaseConnection() {
+  if (process.env.NODE_ENV === 'development' || process.env.SUPABASE_DEBUG === 'true') {
+    console.log('🔄 Resetting database connection...');
+  }
+  if (pool) {
+    try {
+      await pool.end();
+    } catch (error) {
+      // Silently handle cleanup errors
+    }
+  }
+  pool = null;
+  dbInitialized = false;
+  lastConnectionError = null;
+  initializationPromise = null;
+}
+
+async function performInitialization() {
+  // If there was a previous error, wait before retrying to avoid rate limiting
+  // Circuit breaker errors need longer wait times
+  if (lastConnectionError) {
+    const isCircuitBreaker = lastConnectionError.message?.includes('Circuit breaker') || 
+                             lastConnectionError.message?.includes('circuit breaker');
+    const waitTime = isCircuitBreaker ? 10000 : 2000; // 10s for circuit breaker, 2s for other errors
+    if (process.env.NODE_ENV === 'development' || process.env.SUPABASE_DEBUG === 'true') {
+      console.log(`⏳ Waiting ${waitTime/1000}s before retry...`);
+    }
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  
+  // Close any existing pool before creating a new one
+  if (pool) {
+    try {
+      await pool.end();
+    } catch (error) {
+      console.warn('⚠️ Error closing existing pool:', error.message);
+    }
+    pool = null;
+  }
+  
+  // Get initial connection config
+  let config = getConnectionConfig();
+  const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
+  const isDirectAttempt = config.connectionString.includes('db.') && config.connectionString.includes('.supabase.co');
+  
+  // Try direct connection first (if configured), with fallback to pooler
+  if (isDirectAttempt) {
+    if (process.env.NODE_ENV === 'development' || process.env.SUPABASE_DEBUG === 'true') {
+      console.log('🔌 Attempting direct connection (IPv6)...');
     }
     
-    pool = new Pool(config);
+    try {
+      pool = new Pool(config);
+      const timeout = 10000; // 10s timeout for direct connection
+      
+      const client = await Promise.race([
+        pool.connect(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error(`Connection timeout after ${timeout/1000} seconds`)), timeout)
+        )
+      ]);
+      
+      await client.query('SELECT NOW()');
+      client.release();
+      
+      if (process.env.NODE_ENV === 'development' || process.env.SUPABASE_DEBUG === 'true') {
+        console.log('✅ Direct connection (IPv6) successful');
+      }
+      await initializeDatabase();
+      return true;
+    } catch (directError) {
+      // Check if this is an IPv6-related error that suggests we should fall back to pooler
+      const isIPv6Error = directError?.code === 'ENOTFOUND' || 
+                          directError?.code === 'EAI_AGAIN' ||
+                          directError?.code === 'ETIMEDOUT' ||
+                          directError?.code === 'ECONNREFUSED' ||
+                          directError?.message?.includes('getaddrinfo');
+      
+      if (isIPv6Error && isVercel) {
+        if (process.env.NODE_ENV === 'development' || process.env.SUPABASE_DEBUG === 'true') {
+          console.log('⚠️ Direct connection failed on Vercel (expected), falling back to pooler...');
+        }
+      } else if (isIPv6Error) {
+        if (process.env.NODE_ENV === 'development' || process.env.SUPABASE_DEBUG === 'true') {
+          console.log('⚠️ Direct connection failed, falling back to pooler...');
+        }
+      } else {
+        // Not an IPv6 error, re-throw it
+        throw directError;
+      }
+      
+      // Close the failed direct connection pool
+      if (pool) {
+        try {
+          await pool.end();
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+        pool = null;
+      }
+      
+      // Fall through to try pooler connection
+    }
+  }
+  
+  // Use pooler connection (either as fallback or primary choice)
+  try {
+    // Construct pooler connection config
+    const PROJECT_REF = process.env.SUPABASE_PROJECT_REF;
+    const PASSWORD = process.env.SUPABASE_DB_PASSWORD;
+    const region = process.env.SUPABASE_POOLER_REGION || 'us-west-2';
+    const useTransactionMode = process.env.SUPABASE_USE_TRANSACTION_MODE !== 'false';
     
-    // Test the connection with timeout
+    let poolerConnectionString;
+    let poolerType;
+    
+    if (useTransactionMode) {
+      poolerConnectionString = `postgresql://postgres.${PROJECT_REF}:${encodeURIComponent(PASSWORD)}@aws-0-${region}.pooler.supabase.com:6543/postgres?pgbouncer=true`;
+      poolerType = 'Transaction Pooler';
+    } else {
+      poolerConnectionString = `postgresql://postgres.${PROJECT_REF}:${encodeURIComponent(PASSWORD)}@aws-0-${region}.pooler.supabase.com:5432/postgres`;
+      poolerType = 'Session Pooler';
+    }
+    
+    if (process.env.NODE_ENV === 'development' || process.env.SUPABASE_DEBUG === 'true') {
+      console.log(`🔌 Attempting ${poolerType} connection (IPv4)...`);
+    }
+    
+    config = {
+      connectionString: poolerConnectionString,
+      ssl: { rejectUnauthorized: false },
+      max: 1,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 15000,
+      allowExitOnIdle: false,
+    };
+    
+    pool = new Pool(config);
+    const timeout = 20000; // 20s timeout for pooler
+    
     const client = await Promise.race([
       pool.connect(),
       new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Connection timeout after 10 seconds')), 10000)
+        setTimeout(() => reject(new Error(`Connection timeout after ${timeout/1000} seconds`)), timeout)
       )
     ]);
     
     await client.query('SELECT NOW()');
     client.release();
     
-    console.log('✅ Database connection test successful');
-    
-    // Initialize database schema
+    if (process.env.NODE_ENV === 'development' || process.env.SUPABASE_DEBUG === 'true') {
+      console.log('✅ Pooler connection successful');
+    }
     await initializeDatabase();
-    
-    console.log('✅ PostgreSQL database initialized successfully');
     return true;
   } catch (error) {
     lastConnectionError = error;
-    console.error('❌ Failed to initialize PostgreSQL database:', error);
-    console.error('Error details:', {
-      message: error?.message,
-      code: error?.code,
-      errno: error?.errno,
-      syscall: error?.syscall,
-      hostname: error?.hostname,
-      stack: error?.stack
-    });
+    // Always log errors, but with less detail in production
+    if (process.env.NODE_ENV === 'development' || process.env.SUPABASE_DEBUG === 'true') {
+      console.error('❌ Failed to initialize PostgreSQL database:', error.message);
+      console.error('Error details:', {
+        code: error?.code,
+        errno: error?.errno,
+        syscall: error?.syscall,
+        hostname: error?.hostname,
+      });
+      
+      // Log specific error types for debugging
+      if (error?.message?.includes('Circuit breaker')) {
+        console.error('⚠️ Circuit breaker is open - Supabase pooler has temporarily disabled connections');
+      } else if (error?.code === 'ENOTFOUND') {
+        console.error('⚠️ DNS lookup failed - check hostname and network connectivity');
+      } else if (error?.code === 'ETIMEDOUT' || error?.code === 'ECONNREFUSED') {
+        console.error('⚠️ Connection timeout/refused - check network, firewall, and Supabase project status');
+      } else if (error?.message?.includes('password') || error?.message?.includes('authentication')) {
+        console.error('⚠️ Authentication failed - verify SUPABASE_DB_PASSWORD is correct');
+      }
+    } else {
+      // Production: minimal logging
+      console.error('❌ Database connection failed:', error.message);
+    }
+    
     pool = null;
     return false;
   }
@@ -175,7 +352,17 @@ export async function getDatabase() {
     const errorMsg = lastConnectionError 
       ? `Database is not available. PostgreSQL connection failed: ${lastConnectionError.message}`
       : 'Database is not available. PostgreSQL connection failed.';
-    throw new Error(errorMsg);
+    const error = new Error(errorMsg);
+    // Attach detailed error information for client-side logging (JavaScript-compatible syntax)
+    error.dbError = lastConnectionError ? {
+      message: lastConnectionError.message,
+      code: lastConnectionError.code,
+      errno: lastConnectionError.errno,
+      syscall: lastConnectionError.syscall,
+      hostname: lastConnectionError.hostname,
+      stack: lastConnectionError.stack,
+    } : null;
+    throw error;
   }
   return pool;
 }

@@ -28,7 +28,19 @@ async function safeDbCall(fn, defaultValue = null, retries = 3) {
       }
       
       console.error('Database error:', error);
-      return defaultValue;
+      // Re-throw with detailed information for API error responses
+      const enhancedError = new Error(error.message || 'Database operation failed');
+      // Add dbError property (JavaScript-compatible syntax)
+      enhancedError.dbError = {
+        message: error.message,
+        code: error.code,
+        errno: error.errno,
+        syscall: error.syscall,
+        hostname: error.hostname,
+        stack: error.stack,
+        originalError: error.toString(),
+      };
+      throw enhancedError;
     }
   }
   return defaultValue;

@@ -19,9 +19,24 @@ export async function GET() {
       return NextResponse.json({ 
         error: 'Database is not available',
         message: 'This deployment does not include database support. Database features are disabled.',
-        data: { inspectors: [], documents: [], variables: {} }
+        data: { inspectors: [], documents: [], variables: {} },
+        dbError: error.dbError || null,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
       }, { status: 503 });
     }
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    return NextResponse.json({ 
+      error: error.message || 'Unknown error',
+      dbError: error.dbError || {
+        message: error.message,
+        code: error.code,
+        errno: error.errno,
+        syscall: error.syscall,
+        hostname: error.hostname,
+      },
+      details: error.toString(),
+      stack: isDevelopment ? error.stack : undefined,
+      timestamp: new Date().toISOString(),
+    }, { status: 500 });
   }
 }

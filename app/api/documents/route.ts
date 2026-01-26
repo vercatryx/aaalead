@@ -125,10 +125,20 @@ export async function POST(request: NextRequest) {
       }
     }
     
+    const isDevelopment = process.env.NODE_ENV === 'development';
     return NextResponse.json({ 
       error: error.message || 'Unknown error',
+      dbError: error.dbError || {
+        message: error.message,
+        code: error.code,
+        errno: error.errno,
+        syscall: error.syscall,
+        hostname: error.hostname,
+      },
       details: error.toString(),
       hint: hint,
+      stack: isDevelopment ? error.stack : undefined,
+      timestamp: new Date().toISOString(),
     }, { status: 500 });
   }
 }

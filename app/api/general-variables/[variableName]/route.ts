@@ -20,7 +20,20 @@ export async function PUT(
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('Error setting general variable:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    return NextResponse.json({ 
+      error: error.message || 'Unknown error',
+      dbError: error.dbError || {
+        message: error.message,
+        code: error.code,
+        errno: error.errno,
+        syscall: error.syscall,
+        hostname: error.hostname,
+      },
+      details: error.toString(),
+      stack: isDevelopment ? error.stack : undefined,
+      timestamp: new Date().toISOString(),
+    }, { status: 500 });
   }
 }
 
@@ -35,6 +48,19 @@ export async function DELETE(
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting general variable:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    return NextResponse.json({ 
+      error: error.message || 'Unknown error',
+      dbError: error.dbError || {
+        message: error.message,
+        code: error.code,
+        errno: error.errno,
+        syscall: error.syscall,
+        hostname: error.hostname,
+      },
+      details: error.toString(),
+      stack: isDevelopment ? error.stack : undefined,
+      timestamp: new Date().toISOString(),
+    }, { status: 500 });
   }
 }

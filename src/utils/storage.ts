@@ -16,8 +16,55 @@ export const apiCall = async (endpoint: string, options: RequestInit = {}) => {
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error || error.message || `API call failed: ${response.statusText}`);
+    const errorData = await response.json().catch(() => ({ error: response.statusText }));
+    
+    // Log detailed database errors to browser console
+    if (errorData.dbError) {
+      console.error('🔴 Database Error Details:', {
+        endpoint,
+        status: response.status,
+        error: errorData.error,
+        dbError: errorData.dbError,
+        details: errorData.details,
+        stack: errorData.stack,
+        timestamp: errorData.timestamp,
+      });
+      
+      // Log individual dbError properties for easier debugging
+      if (errorData.dbError.message) {
+        console.error('  └─ DB Error Message:', errorData.dbError.message);
+      }
+      if (errorData.dbError.code) {
+        console.error('  └─ DB Error Code:', errorData.dbError.code);
+      }
+      if (errorData.dbError.errno) {
+        console.error('  └─ DB Error Number:', errorData.dbError.errno);
+      }
+      if (errorData.dbError.syscall) {
+        console.error('  └─ DB System Call:', errorData.dbError.syscall);
+      }
+      if (errorData.dbError.hostname) {
+        console.error('  └─ DB Hostname:', errorData.dbError.hostname);
+      }
+      if (errorData.stack) {
+        console.error('  └─ Stack Trace:', errorData.stack);
+      }
+    } else {
+      // Log non-database errors
+      console.error('🔴 API Error:', {
+        endpoint,
+        status: response.status,
+        error: errorData.error || errorData.message,
+        details: errorData.details,
+        stack: errorData.stack,
+      });
+    }
+    
+    const error = new Error(errorData.error || errorData.message || `API call failed: ${response.statusText}`);
+    (error as any).dbError = errorData.dbError;
+    (error as any).details = errorData.details;
+    (error as any).status = response.status;
+    throw error;
   }
 
   return response.json();

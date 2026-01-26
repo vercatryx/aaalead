@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getConnectionConfig, getDatabase, isDatabaseAvailable } from '../../../db/database.js';
+import { getConnectionConfig, getDatabase, isDatabaseAvailable, resetDatabaseConnection } from '../../../db/database.js';
+import pg from 'pg';
+const { Pool } = pg;
 
 export async function GET() {
   try {
@@ -17,7 +19,7 @@ export async function GET() {
     const masked = config.connectionString.replace(/:[^:@]+@/, ':****@');
     const host = config.connectionString.split('@')[1]?.split('/')[0] || 'unknown';
     
-    // Test database connection
+    // Test database connection using existing pool
     let dbTest = null;
     try {
       const available = isDatabaseAvailable();
@@ -26,18 +28,53 @@ export async function GET() {
         const result = await pool.query('SELECT NOW() as current_time');
         dbTest = {
           connected: true,
-          current_time: result.rows[0].current_time
+          current_time: result.rows[0].current_time,
+          method: 'existing_pool'
         };
       } else {
         dbTest = {
           connected: false,
-          error: 'Database pool not initialized'
+          error: 'Database pool not initialized',
+          method: 'existing_pool'
         };
       }
     } catch (dbError: any) {
       dbTest = {
         connected: false,
-        error: dbError.message
+        error: dbError.message,
+        dbError: dbError.dbError,
+        method: 'existing_pool'
+      };
+    }
+    
+    // Also try a fresh connection test (bypassing cached pool)
+    let freshTest = null;
+    try {
+      const testPool = new Pool(config);
+      const testClient = await Promise.race([
+        testPool.connect(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout after 10 seconds')), 10000)
+        )
+      ]);
+      await testClient.query('SELECT NOW() as current_time');
+      const result = await testClient.query('SELECT NOW() as current_time');
+      testClient.release();
+      await testPool.end();
+      freshTest = {
+        connected: true,
+        current_time: result.rows[0].current_time,
+        method: 'fresh_connection'
+      };
+    } catch (freshError: any) {
+      freshTest = {
+        connected: false,
+        error: freshError.message,
+        code: freshError.code,
+        errno: freshError.errno,
+        syscall: freshError.syscall,
+        hostname: freshError.hostname,
+        method: 'fresh_connection'
       };
     }
     
@@ -49,6 +86,7 @@ export async function GET() {
       isDirect: config.connectionString.includes('db.hxsjkzatrfefeojvaitn.supabase.co'),
       envCheck,
       dbTest,
+      freshTest,
       timestamp: new Date().toISOString()
     });
   } catch (error: any) {
