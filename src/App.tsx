@@ -92,12 +92,28 @@ function App() {
         });
 
         // Load individual data
-        const [loadedInspectors, loadedGeneralTypes, loadedInspectorTypes, loadedGeneralDocs, loadedInspectorDocs, loadedGeneralVars, loadedInspectorVarNames] = await Promise.all([
+        // Split into batches to avoid exhausting database connection pool
+        // Batch 1: Core data (can run in parallel)
+        const [loadedInspectors, loadedGeneralTypes, loadedInspectorTypes] = await Promise.all([
           loadInspectorsAsync(),
           loadGeneralDocumentTypesAsync(),
           loadInspectorDocumentTypesAsync(),
+        ]);
+        
+        // Small delay to allow connections to be released
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Batch 2: Documents (can run in parallel)
+        const [loadedGeneralDocs, loadedInspectorDocs] = await Promise.all([
           loadGeneralTypedDocuments(),
           loadInspectorDocuments(),
+        ]);
+        
+        // Small delay to allow connections to be released
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Batch 3: Variables (can run in parallel)
+        const [loadedGeneralVars, loadedInspectorVarNames] = await Promise.all([
           loadGeneralVariablesAsync(),
           loadInspectorVariableNamesAsync(),
         ]);
@@ -133,21 +149,29 @@ function App() {
         setGeneralVariables(updatedGeneralVars);
         setInspectorVariableNames(updatedInspectorVarNames);
         
-        // Convert loaded documents back to Document type (files will need to be loaded separately)
-        const generalDocsMap = new Map<string, Document>();
+        // Convert loaded documents back to Document type (preserve filePath for previews)
+        const generalDocsMap = new Map<string, Document & { filePath?: string }>();
         for (const [key, doc] of loadedGeneralDocs.entries()) {
-          // Note: Files are stored by path, so we'll need to load them when needed
-          // For now, we'll keep the metadata
-          generalDocsMap.set(key, { ...doc, file: doc.file || new Blob() } as Document);
+          // Preserve filePath and only use file if it's valid (not empty)
+          const docWithPath = {
+            ...doc,
+            file: doc.file && doc.file.size > 0 ? doc.file : undefined,
+            filePath: doc.filePath
+          } as Document & { filePath?: string };
+          generalDocsMap.set(key, docWithPath);
         }
-        setGeneralTypedDocuments(generalDocsMap);
+        setGeneralTypedDocuments(generalDocsMap as Map<string, Document>);
 
-        const inspectorDocsMap = new Map<string, Document[]>();
+        const inspectorDocsMap = new Map<string, (Document & { filePath?: string })[]>();
         for (const [inspectorId, docs] of loadedInspectorDocs.entries()) {
-          const fullDocs = docs.map(d => ({ ...d, file: d.file || new Blob() } as Document));
+          const fullDocs = docs.map(d => ({
+            ...d,
+            file: d.file && d.file.size > 0 ? d.file : undefined,
+            filePath: d.filePath
+          } as Document & { filePath?: string }));
           inspectorDocsMap.set(inspectorId, fullDocs);
         }
-        setInspectorDocuments(inspectorDocsMap);
+        setInspectorDocuments(inspectorDocsMap as Map<string, Document[]>);
       } catch (error: any) {
         console.error('Error initializing storage or loading data:', error);
         setInitError(error?.message || 'Failed to initialize application');
@@ -438,9 +462,18 @@ function App() {
       
       await saveInspectorDocuments(newMap);
       
-      // Update state with the new document (we already have the file, no need to reload from R2)
-      // This avoids CORS issues when trying to fetch from R2 directly
-      setInspectorDocuments(newMap);
+      // Reload documents to get filePath from database
+      // This ensures filePath is available for previews
+      const reloadedDocs = await loadInspectorDocuments();
+      const reloadedMap = new Map<string, (Document & { filePath?: string })[]>();
+      for (const [inspectorId, docs] of reloadedDocs.entries()) {
+        reloadedMap.set(inspectorId, docs.map(d => ({
+          ...d,
+          file: d.file && d.file.size > 0 ? d.file : document.file, // Keep the original file if reloaded one is empty
+          filePath: d.filePath
+        } as Document & { filePath?: string })));
+      }
+      setInspectorDocuments(reloadedMap as Map<string, Document[]>);
       
       console.log(`✅ Successfully uploaded ${file.name} to R2 with ID ${documentId}`);
     } catch (error: any) {
@@ -576,13 +609,18 @@ function App() {
       // saveGeneralTypedDocuments will use the same ID we determined
       await saveGeneralTypedDocuments(new Map([[documentType, document]]));
       
-      // Update state with the new document (we already have the file, no need to reload from R2)
-      // This avoids CORS issues when trying to fetch from R2 directly
-      setGeneralTypedDocuments(prev => {
-        const newMap = new Map(prev);
-        newMap.set(documentType, document);
-        return newMap;
-      });
+      // Reload documents to get filePath from database
+      // This ensures filePath is available for previews
+      const reloadedDocs = await loadGeneralTypedDocuments();
+      const reloadedMap = new Map<string, Document & { filePath?: string }>();
+      for (const [docType, doc] of reloadedDocs.entries()) {
+        reloadedMap.set(docType, {
+          ...doc,
+          file: doc.file && doc.file.size > 0 ? doc.file : document.file, // Keep the original file if reloaded one is empty
+          filePath: doc.filePath
+        } as Document & { filePath?: string });
+      }
+      setGeneralTypedDocuments(reloadedMap as Map<string, Document>);
       
       console.log(`✅ Successfully uploaded ${file.name} to R2 with ID ${documentId}`);
     } catch (error: any) {

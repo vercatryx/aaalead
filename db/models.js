@@ -1,19 +1,37 @@
 import { getDatabase, getDatabaseSync, isDatabaseAvailable } from './database.js';
 
-// Helper to safely call database functions
-async function safeDbCall(fn, defaultValue = null) {
-  try {
-    // Always try to get the database - it will initialize if needed
-    const pool = await getDatabase();
-    if (!pool) {
-      console.warn('Database pool is null, returning default value');
+// Helper to safely call database functions with retry logic
+async function safeDbCall(fn, defaultValue = null, retries = 3) {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      // Always try to get the database - it will initialize if needed
+      const pool = await getDatabase();
+      if (!pool) {
+        console.warn('Database pool is null, returning default value');
+        return defaultValue;
+      }
+      return await fn();
+    } catch (error) {
+      // Check if it's a connection pool exhaustion error
+      const isPoolExhausted = error.message && (
+        error.message.includes('max clients reached') ||
+        error.message.includes('MaxClientsInSessionMode') ||
+        error.message.includes('too many clients')
+      );
+      
+      if (isPoolExhausted && attempt < retries - 1) {
+        // Wait with exponential backoff before retrying
+        const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+        console.warn(`Database pool exhausted, retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      
+      console.error('Database error:', error);
       return defaultValue;
     }
-    return await fn();
-  } catch (error) {
-    console.error('Database error:', error);
-    return defaultValue;
   }
+  return defaultValue;
 }
 
 // ==================== INSPECTORS ====================
@@ -115,15 +133,17 @@ export async function getAllInspectorVariableNames() {
 }
 
 export async function addInspectorVariableName(variableName) {
-  const pool = await getDatabase();
-  try {
-    await pool.query('INSERT INTO inspector_variable_names (variable_name) VALUES ($1)', [variableName]);
-    return true;
-  } catch (error) {
-    // Ignore if already exists
-    if (error.code === '23505') return false; // Unique violation
-    throw error;
-  }
+  return safeDbCall(async () => {
+    const pool = await getDatabase();
+    try {
+      await pool.query('INSERT INTO inspector_variable_names (variable_name) VALUES ($1)', [variableName]);
+      return true;
+    } catch (error) {
+      // Ignore if already exists
+      if (error.code === '23505') return false; // Unique violation
+      throw error;
+    }
+  }, false);
 }
 
 export async function deleteInspectorVariableName(variableName) {

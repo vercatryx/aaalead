@@ -44,9 +44,12 @@ export function getConnectionConfig() {
       rejectUnauthorized: false // Supabase requires SSL
     },
     // Connection pool settings
-    max: 20, // Maximum number of clients in the pool
-    idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-    connectionTimeoutMillis: 10000, // Return an error after 10 seconds if connection cannot be established
+    // Supabase Session Pooler has a limit (typically 15 connections)
+    // Reduce pool size to avoid "max clients reached" errors
+    max: 10, // Maximum number of clients in the pool (reduced for Supabase Session Pooler)
+    idleTimeoutMillis: 10000, // Close idle clients after 10 seconds (faster cleanup)
+    connectionTimeoutMillis: 5000, // Return an error after 5 seconds if connection cannot be established
+    allowExitOnIdle: true, // Allow pool to close when idle
   };
 }
 

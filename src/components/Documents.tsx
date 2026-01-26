@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Upload, FileText, Plus, X, Folder, UserPlus, Trash2, FolderOpen, Edit2, Hash, Loader2, AlertCircle, Lock } from 'lucide-react';
 import type { Inspector, Document } from '../types/documents';
 import { flattenPdf } from '../utils/pdfGenerator';
+import { DocumentPreview } from './DocumentPreview';
 
 interface DocumentsProps {
   inspectors: Inspector[];
@@ -768,23 +769,28 @@ export const Documents: React.FC<DocumentsProps> = ({
                     {getInspectorDocumentsByType(selectedInspector, selectedDocumentType).length > 0 ? 'Replace Document' : 'Upload Document'}
                   </button>
                 )}
-                <div className="space-y-2">
+                <div className="space-y-4">
                   {getInspectorDocumentsByType(selectedInspector, selectedDocumentType).length === 0 ? (
                     <p className="text-slate-400 text-sm py-8 text-center">No documents in this folder</p>
                   ) : (
                     getInspectorDocumentsByType(selectedInspector, selectedDocumentType).map((doc) => (
                       <div
                         key={doc.id}
-                        className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors group"
+                        className="bg-white border border-slate-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow group"
                       >
-                        <FileText className="text-slate-400" size={18} />
-                        <span className="flex-1 text-sm text-slate-900">{doc.fileName}</span>
-                        <button
-                          onClick={() => onDeleteDocument(doc.id, 'inspector')}
-                          className="opacity-0 group-hover:opacity-100 p-1 text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        <div className="p-3 border-b border-slate-200 flex items-center gap-3 bg-slate-50">
+                          <FileText className="text-slate-400" size={18} />
+                          <span className="flex-1 text-sm font-medium text-slate-900 truncate">{doc.fileName}</span>
+                          <button
+                            onClick={() => onDeleteDocument(doc.id, 'inspector')}
+                            className="opacity-0 group-hover:opacity-100 p-1 text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                        <div className="p-3">
+                          <DocumentPreview document={doc as Document & { filePath?: string }} />
+                        </div>
                       </div>
                     ))
                   )}
@@ -822,20 +828,25 @@ export const Documents: React.FC<DocumentsProps> = ({
                     {generalTypedDocuments.has(selectedDocumentType) ? 'Replace Document' : 'Upload Document'}
                   </button>
                 )}
-                <div className="space-y-2">
+                <div className="space-y-4">
                   {generalTypedDocuments.has(selectedDocumentType) ? (
-                    <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors group">
-                      <FileText className="text-slate-400" size={18} />
-                      <span className="flex-1 text-sm text-slate-900">{generalTypedDocuments.get(selectedDocumentType)?.fileName}</span>
-                      <button
-                        onClick={() => {
-                          const doc = generalTypedDocuments.get(selectedDocumentType);
-                          if (doc) onDeleteDocument(doc.id, 'general-typed');
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow group">
+                      <div className="p-3 border-b border-slate-200 flex items-center gap-3 bg-slate-50">
+                        <FileText className="text-slate-400" size={18} />
+                        <span className="flex-1 text-sm font-medium text-slate-900 truncate">{generalTypedDocuments.get(selectedDocumentType)?.fileName}</span>
+                        <button
+                          onClick={() => {
+                            const doc = generalTypedDocuments.get(selectedDocumentType);
+                            if (doc) onDeleteDocument(doc.id, 'general-typed');
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-1 text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                      <div className="p-3">
+                        <DocumentPreview document={generalTypedDocuments.get(selectedDocumentType)! as Document & { filePath?: string }} />
+                      </div>
                     </div>
                   ) : (
                     <p className="text-slate-400 text-sm py-8 text-center">No document in this folder</p>
