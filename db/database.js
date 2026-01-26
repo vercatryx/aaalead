@@ -273,6 +273,9 @@ async function performInitialization() {
     // which are not supported in Transaction Mode (port 6543)
     const useTransactionMode = process.env.SUPABASE_USE_TRANSACTION_MODE === 'true';
 
+    let poolerConnectionString;
+    let poolerType;
+
     // Explicitly log the decision logic if debugging
     if (process.env.NODE_ENV === 'development' || process.env.SUPABASE_DEBUG === 'true') {
       if (!useTransactionMode && process.env.SUPABASE_USE_TRANSACTION_MODE !== 'false') {
