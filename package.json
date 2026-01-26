@@ -2,33 +2,24 @@
   "name": "lead-reports",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
   "scripts": {
-    "dev": "concurrently -n \"API,REACT\" -c \"blue,green\" \"npm run server\" \"npm run react-dev\"",
-    "start": "npm run dev",
-    "react-dev": "react-scripts start",
-    "server": "node server.js",
-    "build": "react-scripts build && echo 'Build complete. Run npm run serve to start production server.'",
-    "serve": "NODE_ENV=production node server.js",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
     "inspect-pdf": "npx tsx scripts/inspectPDF.ts",
     "add-signature-field": "npx tsx scripts/addSignatureField.ts",
     "remove-signature-field": "npx tsx scripts/removeSignatureField.ts",
     "copy-pdf-worker": "cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdf.worker.mjs || echo 'Worker file not found, will use CDN'",
     "postinstall": "npm run copy-pdf-worker"
   },
-  "proxy": "http://localhost:3001",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.972.0",
     "@aws-sdk/s3-request-presigner": "^3.972.0",
     "@types/qrcode": "^1.5.6",
-    "cors": "^2.8.6",
-    "dotenv": "^16.6.1",
-    "express": "^4.22.1",
-    "lucide-react": "^0.471.1",
     "better-sqlite3": "^11.6.0",
-    "multer": "^1.4.5-lts.1",
+    "lucide-react": "^0.471.1",
+    "next": "^14.2.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^5.4.530",
     "qrcode": "^1.5.4",
@@ -37,26 +28,13 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "ajv": "^8.17.1",
     "autoprefixer": "^10.4.16",
-    "concurrently": "^9.2.1",
     "postcss": "^8.4.31",
-    "react-scripts": "^5.0.1",
     "tailwindcss": "^3.3.0",
-    "typescript": "~4.9.5"
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
+    "typescript": "^5.0.0"
   }
 }

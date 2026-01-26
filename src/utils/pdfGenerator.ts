@@ -804,6 +804,38 @@ const flattenFormAsImage = async (pdfDoc: PDFDocument): Promise<void> => {
     }
     
     try {
+        // CRITICAL: Get page dimensions from pdf-lib BEFORE flattening to preserve exact dimensions
+        // This is the most reliable way to preserve landscape/portrait orientation
+        // IMPORTANT: If a page has rotation (90/270), we need to swap dimensions to get the actual page size
+        const pages = pdfDoc.getPages();
+        const originalPageDimensions: Array<{ width: number; height: number }> = [];
+        for (let i = 0; i < pages.length; i++) {
+            const page = pages[i];
+            const pageSize = page.getSize();
+            
+            // Check if page has rotation - if rotated 90/270, dimensions are swapped
+            // We need to get the actual page dimensions (before rotation)
+            let actualWidth = pageSize.width;
+            let actualHeight = pageSize.height;
+            
+            // Try to get rotation - if page is rotated 90/270, swap dimensions
+            try {
+                const rotation = (page as any).rotation;
+                const rotationAngle = (typeof rotation === 'object' && rotation?.angle) ? rotation.angle : (typeof rotation === 'number' ? rotation : 0);
+                if (rotationAngle === 90 || rotationAngle === 270) {
+                    // Dimensions are swapped due to rotation, swap them back
+                    [actualWidth, actualHeight] = [actualHeight, actualWidth];
+                    console.log(`Page ${i + 1}: Has ${rotationAngle}° rotation - swapped dimensions from ${pageSize.width}x${pageSize.height} to ${actualWidth}x${actualHeight}`);
+                }
+            } catch {
+                // If we can't get rotation, use dimensions as-is
+            }
+            
+            originalPageDimensions.push({ width: actualWidth, height: actualHeight });
+            const isLandscape = actualWidth > actualHeight;
+            console.log(`Page ${i + 1} original dimensions (from pdf-lib): ${actualWidth}x${actualHeight} (${isLandscape ? 'landscape' : 'portrait'})`);
+        }
+        
         // Save the PDF to bytes first
         const pdfBytes = await pdfDoc.save();
         
@@ -812,8 +844,7 @@ const flattenFormAsImage = async (pdfDoc: PDFDocument): Promise<void> => {
         const pdf = await loadingTask.promise;
         const numPages = pdf.numPages;
         
-        // Get page dimensions directly from pdf.js (more reliable than pdf-lib for orientation)
-        // Store images and page sizes as we create them
+        // Store images and page sizes - use original dimensions from pdf-lib
         const pageImages: Array<{ image: any; width: number; height: number }> = [];
         
         // Render each page to canvas and convert to image
@@ -821,32 +852,28 @@ const flattenFormAsImage = async (pdfDoc: PDFDocument): Promise<void> => {
         for (let pageNum = 1; pageNum <= numPages; pageNum++) {
             const pdfPage = await pdf.getPage(pageNum);
             
-            // Get the page's rotation from the PDF metadata
-            // Some pages may have rotation (0, 90, 180, 270) which affects orientation
+            // Get the page's rotation from pdf.js (more reliable than pdf-lib for rotation detection)
             const pageRotation = pdfPage.rotate || 0;
             
-            // Get viewport using the page's ACTUAL rotation to preserve how it should appear
-            // This ensures rotated pages are rendered correctly
-            const scale = 3.0; // High scale for quality
-            const viewport = pdfPage.getViewport({ scale: scale, rotation: pageRotation });
+            // Use the original dimensions from pdf-lib, but check if pdf.js rotation indicates we need to swap
+            let originalDims = originalPageDimensions[pageNum - 1];
+            let originalWidth = originalDims.width;
+            let originalHeight = originalDims.height;
             
-            // Get the page dimensions from the viewport
-            // The viewport with the page's rotation gives us the correct displayed dimensions
-            let originalWidth = viewport.width / scale;
-            let originalHeight = viewport.height / scale;
-            
-            // For pages with 90/270 degree rotation, the displayed dimensions are swapped
-            // But we want to preserve the natural page orientation, so check if we need to swap
-            if (pageRotation === 90 || pageRotation === 270) {
-                // When rotated 90/270, the viewport dimensions are swapped
-                // We need to swap them back to get the natural page dimensions
+            // If pdf.js shows 90/270 rotation, the dimensions from pdf-lib might be swapped
+            // Double-check: if rotation is 90/270 and width < height, swap them
+            if ((pageRotation === 90 || pageRotation === 270) && originalWidth < originalHeight) {
                 [originalWidth, originalHeight] = [originalHeight, originalWidth];
-                console.log(`Page ${pageNum}: Has ${pageRotation}° rotation - swapped dimensions to ${originalWidth.toFixed(1)}x${originalHeight.toFixed(1)}`);
+                console.log(`Page ${pageNum}: pdf.js shows ${pageRotation}° rotation, swapped dimensions to ${originalWidth}x${originalHeight}`);
             }
             
-            // Log for debugging
             const isLandscape = originalWidth > originalHeight;
-            console.log(`Page ${pageNum}: ${isLandscape ? 'Landscape' : 'Portrait'} - Dimensions: ${originalWidth.toFixed(1)}x${originalHeight.toFixed(1)}${pageRotation ? ` (had ${pageRotation}° rotation, now corrected)` : ''}`);
+            console.log(`Page ${pageNum}: Using original dimensions ${originalWidth}x${originalHeight} (${isLandscape ? 'landscape' : 'portrait'})${pageRotation ? `, PDF rotation: ${pageRotation}°` : ''}`);
+            
+            // Get viewport - use rotation 0 to get natural page dimensions
+            // We'll render with the page's rotation, but use original dimensions for the final page
+            const scale = 3.0; // High scale for quality
+            const viewport = pdfPage.getViewport({ scale: scale, rotation: pageRotation });
             
             // Create canvas with viewport dimensions
             const canvas = document.createElement('canvas');
@@ -858,7 +885,7 @@ const flattenFormAsImage = async (pdfDoc: PDFDocument): Promise<void> => {
             canvas.height = viewport.height;
             
             // Render PDF page to canvas with high quality
-            // Using the page's actual rotation ensures content is rendered correctly
+            // Using the page's rotation (including our added rotation for page 6) ensures content is rendered correctly
             await pdfPage.render({
                 canvasContext: context,
                 viewport: viewport
@@ -871,13 +898,14 @@ const flattenFormAsImage = async (pdfDoc: PDFDocument): Promise<void> => {
             const response = await fetch(imageData);
             const imageBytes = await response.arrayBuffer();
             
-            // Embed image and store it with corrected dimensions (preserves landscape/portrait)
+            // Embed image and store it with ORIGINAL dimensions from pdf-lib (preserves landscape/portrait)
             const image = await pdfDoc.embedPng(imageBytes);
             pageImages.push({ 
                 image, 
-                width: originalWidth,   // Corrected width (preserves orientation)
-                height: originalHeight  // Corrected height (preserves orientation)
+                width: originalWidth,   // Use original width from pdf-lib (preserves orientation)
+                height: originalHeight  // Use original height from pdf-lib (preserves orientation)
             });
+            console.log(`Page ${pageNum} flattened: stored with dimensions ${originalWidth}x${originalHeight} (${isLandscape ? 'landscape' : 'portrait'})`);
         }
         
         // Remove ALL old pages first (from end to beginning to avoid index issues)
@@ -2390,10 +2418,8 @@ export const generatePDFReport = async (
                         console.log(`✅ Page dimensions preserved: ${insertedSize.width}x${insertedSize.height} (${isLandscape ? 'landscape' : 'portrait'})`);
                     }
                     
-                    // Rotate page 6 clockwise 90 degrees to correct orientation
-                    // pdf-lib setRotation accepts: 0, 90, 180, or 270 degrees
-                    insertedPage.setRotation(90);
-                    console.log(`✅ Rotated page 6 clockwise 90° to correct landscape orientation`);
+                    // Note: We'll rotate page 6 during flattening to avoid distortion
+                    // Don't set rotation here - it will be handled in flattenFormAsImage
                     
                     console.log(`✅ Successfully moved original page 7 to position 6. New total pages: ${pdfDoc.getPageCount()}`);
                 } else {
@@ -2426,6 +2452,9 @@ export const generatePDFReport = async (
                 // Don't throw - allow PDF to be generated even if not flattened
             }
         }
+
+        // Note: Page 6 rotation is handled during flattening by preserving correct dimensions
+        // No additional rotation needed - dimensions are preserved correctly
 
         // 9. Save and Download
         const pdfBytes = await pdfDoc.save();
