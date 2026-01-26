@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+// Make database optional for Vercel deployment (better-sqlite3 is a native module)
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -7,14 +7,72 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 let dbInstance = null;
+let dbAvailable = false;
+let dbInitialized = false;
 
-export function getDatabase() {
-  if (!dbInstance) {
+async function initializeDatabaseModule() {
+  if (dbInitialized) {
+    return dbAvailable;
+  }
+  dbInitialized = true;
+  
+  try {
+    // Dynamic import to avoid build errors if better-sqlite3 isn't available
+    const Database = (await import('better-sqlite3')).default;
     const dbPath = join(__dirname, '..', 'lead-reports.db');
     dbInstance = new Database(dbPath);
-    
-    // Initialize tables if they don't exist
     initializeDatabase(dbInstance);
+    dbAvailable = true;
+    console.log('Database initialized successfully');
+  } catch (error) {
+    // better-sqlite3 is not available (e.g., on Vercel)
+    console.warn('Database not available. better-sqlite3 is not installed or not supported in this environment.');
+    console.warn('Database features will be disabled. This is expected on Vercel deployments.');
+    dbAvailable = false;
+    dbInstance = null;
+  }
+  
+  return dbAvailable;
+}
+
+export async function getDatabase() {
+  await initializeDatabaseModule();
+  if (!dbAvailable || !dbInstance) {
+    throw new Error('Database is not available. better-sqlite3 is not installed or not supported in this environment.');
+  }
+  return dbInstance;
+}
+
+export function isDatabaseAvailable() {
+  return dbAvailable;
+}
+
+// Synchronous version for models.js (will throw if not available)
+// Note: This will fail if better-sqlite3 is not available, but safeDbCall in models.js handles it
+export function getDatabaseSync() {
+  if (!dbInitialized) {
+    // Try to initialize synchronously
+    // We use a try-catch to handle cases where better-sqlite3 isn't available
+    try {
+      // Use createRequire for ES modules compatibility
+      const { createRequire } = require('module');
+      const requireFn = createRequire(import.meta.url);
+      const Database = requireFn('better-sqlite3');
+      const dbPath = join(__dirname, '..', 'lead-reports.db');
+      dbInstance = new Database(dbPath);
+      initializeDatabase(dbInstance);
+      dbAvailable = true;
+      dbInitialized = true;
+    } catch (error) {
+      // better-sqlite3 is not available (e.g., on Vercel)
+      dbAvailable = false;
+      dbInitialized = true;
+      throw new Error('Database is not available. better-sqlite3 is not installed or not supported in this environment.');
+    }
+  }
+  
+  if (!dbAvailable || !dbInstance) {
+    throw new Error('Database is not available. better-sqlite3 is not installed or not supported in this environment.');
   }
   return dbInstance;
 }

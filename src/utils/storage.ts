@@ -191,8 +191,8 @@ export const saveInspectorVariableNames = async (names: string[]): Promise<void>
   // Get current names and sync
   try {
     const current = await apiCall('/api/inspector-variable-names');
-    const toAdd = names.filter(n => !current.includes(n));
-    const toDelete = current.filter(n => !names.includes(n));
+    const toAdd = names.filter((n: string) => !(current as string[]).includes(n));
+    const toDelete = (current as string[]).filter((n: string) => !names.includes(n));
 
     for (const name of toAdd) {
       await apiCall('/api/inspector-variable-names', {
@@ -229,8 +229,8 @@ export const loadGeneralDocumentTypesAsync = async (): Promise<string[]> => {
 export const saveGeneralDocumentTypes = async (types: string[]): Promise<void> => {
   try {
     const current = await apiCall('/api/document-types/general');
-    const toAdd = types.filter(t => !current.includes(t));
-    const toDelete = current.filter(t => !types.includes(t));
+    const toAdd = types.filter((t: string) => !(current as string[]).includes(t));
+    const toDelete = (current as string[]).filter((t: string) => !types.includes(t));
 
     for (const type of toAdd) {
       await apiCall('/api/document-types', {
@@ -266,8 +266,8 @@ export const loadInspectorDocumentTypesAsync = async (): Promise<string[]> => {
 export const saveInspectorDocumentTypes = async (types: string[]): Promise<void> => {
   try {
     const current = await apiCall('/api/document-types/inspector');
-    const toAdd = types.filter(t => !current.includes(t));
-    const toDelete = current.filter(t => !types.includes(t));
+    const toAdd = types.filter((t: string) => !(current as string[]).includes(t));
+    const toDelete = (current as string[]).filter((t: string) => !types.includes(t));
 
     for (const type of toAdd) {
       await apiCall('/api/document-types', {
@@ -573,7 +573,7 @@ export const saveGeneralVariables = async (variables: Map<string, string>): Prom
     const currentMap = new Map(current);
     const toAdd = Array.from(variables.entries()).filter(([k]) => !currentMap.has(k));
     const toUpdate = Array.from(variables.entries()).filter(([k, v]) => currentMap.get(k) !== v);
-    const toDelete = Array.from(currentMap.keys()).filter(k => !variables.has(k));
+    const toDelete = Array.from(currentMap.keys()).filter((k) => !variables.has(k as string));
 
     for (const [name, value] of [...toAdd, ...toUpdate]) {
       await apiCall(`/api/general-variables/${encodeURIComponent(name)}`, {
@@ -583,7 +583,7 @@ export const saveGeneralVariables = async (variables: Map<string, string>): Prom
     }
 
     for (const name of toDelete) {
-      await apiCall(`/api/general-variables/${encodeURIComponent(name)}`, {
+      await apiCall(`/api/general-variables/${encodeURIComponent(name as string)}`, {
         method: 'DELETE',
       });
     }
@@ -595,35 +595,10 @@ export const saveGeneralVariables = async (variables: Map<string, string>): Prom
 // ==================== FILE STORAGE ====================
 
 export const storeFile = async (file: File, docId: string): Promise<string> => {
-  const envCheck = {
-    REACT_APP_R2_ENDPOINT: process.env.REACT_APP_R2_ENDPOINT ? '✅' : '❌',
-    REACT_APP_R2_ACCESS_KEY_ID: process.env.REACT_APP_R2_ACCESS_KEY_ID ? '✅' : '❌',
-    REACT_APP_R2_SECRET_ACCESS_KEY: process.env.REACT_APP_R2_SECRET_ACCESS_KEY ? '✅' : '❌',
-    REACT_APP_R2_BUCKET_NAME: process.env.REACT_APP_R2_BUCKET_NAME ? '✅' : '❌',
-  };
-  console.log('🔍 Environment Variables Check in storeFile:', envCheck);
-
-  const r2Configured = await isR2Configured();
-  if (!r2Configured) {
-    const missingVars: string[] = [];
-    if (!process.env.REACT_APP_R2_ENDPOINT) missingVars.push('REACT_APP_R2_ENDPOINT');
-    if (!process.env.REACT_APP_R2_ACCESS_KEY_ID) missingVars.push('REACT_APP_R2_ACCESS_KEY_ID');
-    if (!process.env.REACT_APP_R2_SECRET_ACCESS_KEY) missingVars.push('REACT_APP_R2_SECRET_ACCESS_KEY');
-    if (!process.env.REACT_APP_R2_BUCKET_NAME) missingVars.push('REACT_APP_R2_BUCKET_NAME');
-
-    throw new Error(
-      '❌ R2 storage is not configured!\n\n' +
-      'Missing environment variables:\n' +
-      missingVars.map(v => `  - ${v}`).join('\n') +
-      '\n\nTo enable R2 uploads, add these to your .env.local file:\n' +
-      '  REACT_APP_R2_ENDPOINT=your-r2-endpoint\n' +
-      '  REACT_APP_R2_ACCESS_KEY_ID=your-access-key\n' +
-      '  REACT_APP_R2_SECRET_ACCESS_KEY=your-secret-key\n' +
-      '  REACT_APP_R2_BUCKET_NAME=your-bucket-name\n\n' +
-      '⚠️ IMPORTANT: After adding these, you MUST restart your development server (stop and run npm start again).\n' +
-      'Environment variables are only loaded when the dev server starts.'
-    );
-  }
+  // In Next.js, client-side code can only access NEXT_PUBLIC_* variables
+  // But the actual R2 upload happens via API routes (server-side), so we don't need to check env vars here
+  // Just try to upload and let the API handle the error if R2 is not configured
+  // The API routes can access both REACT_APP_* and NEXT_PUBLIC_* variables
 
   try {
     // Validate file has a name - use fallback if missing

@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ 
           error: `Inspector with id "${finalInspectorId}" does not exist. Please create the inspector first.`,
           hint: 'Make sure the inspector is created before uploading documents for that inspector.',
-          availableInspectors: allInspectors.map(i => ({ id: i.id, name: i.name }))
+          availableInspectors: allInspectors.map((i: any) => ({ id: i.id, name: i.name }))
         }, { status: 400 });
       }
     } else if (category === 'inspector') {
@@ -64,8 +64,8 @@ export async function POST(request: NextRequest) {
     if (category === 'inspector' && finalInspectorId && finalDocumentType) {
       try {
         const existingDocs = dbModels.getDocumentsByCategory('inspector', finalDocumentType, finalInspectorId);
-        const otherDocs = existingDocs.filter(doc => doc.id !== finalId);
-        otherDocs.forEach(doc => {
+        const otherDocs = existingDocs.filter((doc: any) => doc.id !== finalId);
+        otherDocs.forEach((doc: any) => {
           try {
             dbModels.deleteDocument(doc.id);
           } catch (err) {

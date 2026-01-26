@@ -4,7 +4,7 @@ import * as dbModels from '../../../db/models.js';
 export async function GET() {
   try {
     const inspectors = dbModels.getAllInspectors();
-    return NextResponse.json(inspectors.map(i => ({
+    return NextResponse.json(inspectors.map((i: any) => ({
       id: i.id,
       name: i.name,
       variableValues: i.variableValues ? Array.from(i.variableValues.entries()) : undefined
@@ -22,6 +22,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'id and name are required' }, { status: 400 });
     }
     const inspector = dbModels.createInspector(id, name);
+    if (!inspector) {
+      return NextResponse.json({ error: 'Failed to create inspector' }, { status: 500 });
+    }
     return NextResponse.json({
       id: inspector.id,
       name: inspector.name,

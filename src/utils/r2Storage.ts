@@ -1,10 +1,22 @@
 // R2 Configuration
-const R2_ENDPOINT = process.env.REACT_APP_R2_ENDPOINT || '';
-const R2_ACCESS_KEY_ID = process.env.REACT_APP_R2_ACCESS_KEY_ID || '';
-const R2_SECRET_ACCESS_KEY = process.env.REACT_APP_R2_SECRET_ACCESS_KEY || '';
-const R2_BUCKET_NAME = process.env.REACT_APP_R2_BUCKET_NAME || 'lead-reports';
+// In Next.js, client-side code can only access NEXT_PUBLIC_* variables
+// But we check both for backward compatibility
+const R2_ENDPOINT = (typeof window !== 'undefined' 
+  ? (process.env.NEXT_PUBLIC_R2_ENDPOINT || '')
+  : (process.env.REACT_APP_R2_ENDPOINT || process.env.NEXT_PUBLIC_R2_ENDPOINT || ''));
+const R2_ACCESS_KEY_ID = (typeof window !== 'undefined'
+  ? (process.env.NEXT_PUBLIC_R2_ACCESS_KEY_ID || '')
+  : (process.env.REACT_APP_R2_ACCESS_KEY_ID || process.env.NEXT_PUBLIC_R2_ACCESS_KEY_ID || ''));
+const R2_SECRET_ACCESS_KEY = (typeof window !== 'undefined'
+  ? (process.env.NEXT_PUBLIC_R2_SECRET_ACCESS_KEY || '')
+  : (process.env.REACT_APP_R2_SECRET_ACCESS_KEY || process.env.NEXT_PUBLIC_R2_SECRET_ACCESS_KEY || ''));
+const R2_BUCKET_NAME = (typeof window !== 'undefined'
+  ? (process.env.NEXT_PUBLIC_R2_BUCKET_NAME || 'lead-reports')
+  : (process.env.REACT_APP_R2_BUCKET_NAME || process.env.NEXT_PUBLIC_R2_BUCKET_NAME || 'lead-reports'));
 // Public R2 domain (for direct file access without CORS)
-const R2_PUBLIC_DOMAIN = process.env.REACT_APP_R2_PUBLIC_DOMAIN || 'https://pub-4bdeaebf0c04411e9096fdda492f0706.r2.dev';
+const R2_PUBLIC_DOMAIN = (typeof window !== 'undefined'
+  ? (process.env.NEXT_PUBLIC_R2_PUBLIC_DOMAIN || 'https://pub-4bdeaebf0c04411e9096fdda492f0706.r2.dev')
+  : (process.env.REACT_APP_R2_PUBLIC_DOMAIN || process.env.NEXT_PUBLIC_R2_PUBLIC_DOMAIN || 'https://pub-4bdeaebf0c04411e9096fdda492f0706.r2.dev'));
 
 // Debug: Log environment variables (without exposing secrets)
 console.log('🔍 R2 Environment Variables Check:', {
@@ -16,7 +28,7 @@ console.log('🔍 R2 Environment Variables Check:', {
   secretKeyLength: R2_SECRET_ACCESS_KEY.length,
   hasBucket: !!R2_BUCKET_NAME,
   bucketName: R2_BUCKET_NAME,
-  allEnvKeys: Object.keys(process.env).filter(k => k.startsWith('REACT_APP_R2'))
+  allEnvKeys: Object.keys(process.env).filter(k => k.startsWith('REACT_APP_R2') || k.startsWith('NEXT_PUBLIC_R2'))
 });
 
 // Lazy load AWS SDK to avoid breaking if packages aren't installed
@@ -114,6 +126,19 @@ export const uploadFileToR2 = async (file: File | Blob, key: string): Promise<st
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      
+      // If R2 is not configured, show helpful error message
+      if (errorData.error === 'R2 storage is not configured' && errorData.missingVars) {
+        throw new Error(
+          '❌ R2 storage is not configured!\n\n' +
+          'Missing environment variables:\n' +
+          errorData.missingVars.map((v: string) => `  - ${v}`).join('\n') +
+          '\n\n' + (errorData.instructions || '') +
+          '\n\n⚠️ IMPORTANT: After adding these, you MUST restart your development server (stop and run npm run dev again).\n' +
+          'Environment variables are only loaded when the dev server starts.'
+        );
+      }
+      
       throw new Error(errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`);
     }
 
@@ -127,9 +152,8 @@ export const uploadFileToR2 = async (file: File | Blob, key: string): Promise<st
     if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError')) {
       throw new Error(
         `Failed to connect to upload API server.\n\n` +
-        `Please make sure you started the app with:\n` +
-        `  npm start\n\n` +
-        `This will start both the React app and API server together.\n` +
+        `Please make sure you started the Next.js app with:\n` +
+        `  npm run dev\n\n` +
         `Error: ${errorMessage}`
       );
     }
@@ -139,7 +163,7 @@ export const uploadFileToR2 = async (file: File | Blob, key: string): Promise<st
       `File: ${file instanceof File ? file.name : 'Blob'}\n` +
       `Key: ${key}\n\n` +
       `Please check:\n` +
-      `  1. App is running with 'npm start' (starts both React and API server)\n` +
+      `  1. App is running with 'npm run dev'\n` +
       `  2. R2 credentials are configured in .env.local\n` +
       `  3. Network connection is available`
     );
@@ -300,8 +324,24 @@ export const generateR2Key = (docId: string, fileName: string): string => {
 
 /**
  * Check if R2 is configured
+ * In Next.js, client-side can't access server env vars, so we check via API
  */
 export const isR2Configured = async (): Promise<boolean> => {
+  // If we're on the client side, check via API health endpoint
+  if (typeof window !== 'undefined') {
+    try {
+      const response = await fetch('/api/health');
+      if (response.ok) {
+        const data = await response.json();
+        return data.r2Configured === true;
+      }
+    } catch (error) {
+      console.warn('Could not check R2 configuration via API:', error);
+    }
+    return false;
+  }
+  
+  // Server-side: check directly
   const sdkAvailable = await ensureSDKLoaded();
   return !!(
     sdkAvailable &&

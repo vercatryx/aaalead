@@ -3,20 +3,51 @@ import type { ExtractedData } from '../App';
 import { getReportConfig } from '../config/reports';
 import type { Inspector, Document } from '../types/documents';
 import { getTemplateUrl } from './apiConfig';
-import * as pdfjsLib from 'pdfjs-dist';
 import { detectPositiveNegative } from './excelExtractor';
 
-// Set up pdf.js worker
-if (typeof window !== 'undefined') {
-    // Try local file first (copied by postinstall script), fallback to CDN
-    // In pdfjs-dist v5+, the worker is pdf.worker.mjs
-    const version = pdfjsLib.version || '5.4.530';
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `/pdf.worker.mjs`;
-    
-    // If local file fails, it will fallback to trying to load from CDN
-    // Fallback CDN (uncomment if local file doesn't work):
-    // pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.mjs`;
-}
+// Dynamic import for pdfjs-dist to avoid SSR issues
+let pdfjsLib: any = null;
+let pdfjsLibPromise: Promise<any> | null = null;
+
+const getPdfjsLib = async () => {
+  // Only load in browser environment
+  if (typeof window === 'undefined') {
+    throw new Error('pdfjs-dist can only be used in the browser');
+  }
+  
+  // Return cached library if already loaded
+  if (pdfjsLib) {
+    return pdfjsLib;
+  }
+  
+  // Return existing promise if already loading
+  if (pdfjsLibPromise) {
+    return pdfjsLibPromise;
+  }
+  
+  // Load pdfjs-dist dynamically
+  pdfjsLibPromise = (async () => {
+    try {
+      // Use dynamic import to avoid SSR bundling issues
+      // Import the main module - Turbopack will handle it
+      pdfjsLib = await import('pdfjs-dist');
+      
+      // Set up pdf.js worker
+      if (pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
+        const version = pdfjsLib.version || '5.4.530';
+        // Use local worker file (available in public folder)
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `/pdf.worker.mjs`;
+      }
+      
+      return pdfjsLib;
+    } catch (error) {
+      pdfjsLibPromise = null; // Reset on error
+      throw error;
+    }
+  })();
+  
+  return pdfjsLibPromise;
+};
 
 // Helper to check if file is an image
 const isImageFile = (file: File | Blob, fileName?: string): boolean => {
@@ -69,11 +100,11 @@ const embedImageInPDF = async (pdfDoc: PDFDocument, imageFile: File | Blob): Pro
     // Try PNG first, then JPEG
     try {
       image = await pdfDoc.embedPng(arrayBuffer);
-    } catch (pngError) {
+    } catch (pngError: any) {
       try {
         image = await pdfDoc.embedJpg(arrayBuffer);
-      } catch (jpgError) {
-        throw new Error(`Failed to embed image. The file may not be a valid PNG or JPEG image. PNG error: ${pngError.message || pngError}, JPEG error: ${jpgError.message || jpgError}`);
+      } catch (jpgError: any) {
+        throw new Error(`Failed to embed image. The file may not be a valid PNG or JPEG image. PNG error: ${pngError?.message || pngError}, JPEG error: ${jpgError?.message || jpgError}`);
       }
     }
   }
@@ -840,7 +871,11 @@ const flattenFormAsImage = async (pdfDoc: PDFDocument): Promise<void> => {
         const pdfBytes = await pdfDoc.save();
         
         // Use pdf.js to render pages to canvas, then convert to images
-        const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes) });
+        const pdfjs = await getPdfjsLib();
+        if (!pdfjs) {
+            throw new Error('pdfjs-dist is not available in this environment');
+        }
+        const loadingTask = pdfjs.getDocument({ data: new Uint8Array(pdfBytes) });
         const pdf = await loadingTask.promise;
         const numPages = pdf.numPages;
         
@@ -888,8 +923,9 @@ const flattenFormAsImage = async (pdfDoc: PDFDocument): Promise<void> => {
             // Using the page's rotation (including our added rotation for page 6) ensures content is rendered correctly
             await pdfPage.render({
                 canvasContext: context,
-                viewport: viewport
-            }).promise;
+                viewport: viewport,
+                canvas: canvas
+            } as any).promise;
             
             // Convert canvas to PNG with high quality
             const imageData = canvas.toDataURL('image/png', 1.0); // Maximum quality
@@ -967,7 +1003,7 @@ export const flattenPdf = async (file: File): Promise<void> => {
         
         // Save flattened PDF
         const flattenedBytes = await pdfDoc.save();
-        const blob = new Blob([flattenedBytes], { type: 'application/pdf' });
+        const blob = new Blob([flattenedBytes as any], { type: 'application/pdf' });
         
         // Create download link
         const link = document.createElement('a');
@@ -1094,7 +1130,12 @@ export const generatePDFReport = async (
                             const field = form.getTextField(id);
                             if (field) {
                                 field.setText(value);
-                                field.updateAppearances().catch(() => {});
+                                // updateAppearances() may require arguments in some versions
+                                try {
+                                    (field.updateAppearances as any)();
+                                } catch (_err: any) {
+                                    // Ignore appearance update errors
+                                }
                             }
                         } catch (err) {
                             console.warn(`Error filling date field ${id}:`, err);
@@ -1126,7 +1167,11 @@ export const generatePDFReport = async (
                         const secondField = form.getTextField('Applicable Units or Common Areas 2');
                         if (secondField) {
                             secondField.setText(secondPart);
-                            secondField.updateAppearances().catch(() => {});
+                            try {
+                                (secondField.updateAppearances as any)();
+                            } catch (_err: any) {
+                                // Ignore appearance update errors
+                            }
                         }
                     } catch (err) {
                         console.warn('Error filling Applicable Units field 2:', err);
@@ -1170,7 +1215,11 @@ export const generatePDFReport = async (
                                 const dateParts = formattedDate.split('/');
                                 if (dateParts.length === 3) {
                                     field.setText(dateParts[0]); // MM
-                                    field.updateAppearances().catch(() => {});
+                                    try {
+                                        (field.updateAppearances as any)();
+                                    } catch (_err: any) {
+                                        // Ignore appearance update errors
+                                    }
                                 }
                             }
                         }
@@ -1193,7 +1242,11 @@ export const generatePDFReport = async (
                                 }
                             }
                             field.setText(String(valueToFill));
-                            field.updateAppearances().catch(() => {});
+                            try {
+                                (field.updateAppearances as any)();
+                            } catch (_err: any) {
+                                // Ignore appearance update errors
+                            }
                         }
                     }
                     return; // Skip other special case fields as they're already handled
@@ -1329,7 +1382,7 @@ export const generatePDFReport = async (
                         const widgets = field.acroField.getWidgets();
                         if (widgets.length > 0) {
                             const widget = widgets[0];
-                            const fieldPageRef = widget.dict.get('P');
+                            const fieldPageRef = (widget.dict as any).get('P');
                             const pages = pdfDoc.getPages();
                             
                             // Find which page this field is on by comparing references
@@ -1363,7 +1416,7 @@ export const generatePDFReport = async (
                                     try {
                                         const testWidgets = testField.acroField.getWidgets();
                                         if (testWidgets.length > 0) {
-                                            const testPageRef = testWidgets[0].dict.get('P');
+                                            const testPageRef = (testWidgets[0].dict as any).get('P');
                                             for (let i = 0; i < pages.length; i++) {
                                                 if (testPageRef === pages[i].ref) {
                                                     if (!fieldsByPage.has(i)) {
@@ -1431,7 +1484,7 @@ export const generatePDFReport = async (
                         const widgets = field.acroField.getWidgets();
                         if (widgets.length > 0) {
                             const widget = widgets[0];
-                            const pageRef = widget.dict.get('P');
+                            const pageRef = (widget.dict as any).get('P');
                             const pages = pdfDoc.getPages();
                             for (let i = 0; i < pages.length; i++) {
                                 if (pageRef === pages[i].ref) {
@@ -1457,8 +1510,8 @@ export const generatePDFReport = async (
                 // Ensure text appears on top by updating appearances
                 // This ensures the text is properly rendered and visible
                 try {
-                    field.updateAppearances();
-                } catch (e) {
+                    (field.updateAppearances as any)();
+                } catch (e: any) {
                     // Some fields may not support updateAppearances, that's okay
                 }
 
@@ -1496,7 +1549,7 @@ export const generatePDFReport = async (
                                     console.warn('Could not set font size:', fontErr);
                                 }
                                 // Ensure it's visible and on top
-                                textField.updateAppearances();
+                                (textField.updateAppearances as any)();
                             }
                         } catch (textErr) {
                             // If it's not a text field, try as checkbox but write text to a label instead
@@ -1537,13 +1590,13 @@ export const generatePDFReport = async (
         // 3. Prepare Signature image - will be drawn last to appear on top
         if (false && data.selectedInspectorId && inspectorDocuments) {
             try {
-                const inspectorDocs = inspectorDocuments.get(data.selectedInspectorId) || [];
+                const inspectorDocs = inspectorDocuments!.get(data.selectedInspectorId!) || [];
                 // Find signature document (look for document type containing "signature")
-                const signatureDoc = inspectorDocs.find(doc => 
+                const signatureDoc = inspectorDocs.find((doc: any) => 
                     doc.documentType?.toLowerCase().includes('signature')
                 );
 
-                if (signatureDoc && signatureDoc.file) {
+                if (signatureDoc?.file) {
                     try {
                         // Known position of signature (from when we removed the field)
                         // Move 20px higher: original y=86.56, now y=106.56
@@ -1557,12 +1610,12 @@ export const generatePDFReport = async (
                         const targetPage = pages[0]; // Signature is on first page
 
                         // Embed the signature image
-                        const arrayBuffer = await signatureDoc.file.arrayBuffer();
+                        const arrayBuffer = await signatureDoc!.file.arrayBuffer();
                         let image;
                         
-                        if (signatureDoc.file.type === 'image/png') {
+                        if (signatureDoc!.file.type === 'image/png') {
                             image = await pdfDoc.embedPng(arrayBuffer);
-                        } else if (signatureDoc.file.type === 'image/jpeg' || signatureDoc.file.type === 'image/jpg') {
+                        } else if (signatureDoc!.file.type === 'image/jpeg' || signatureDoc!.file.type === 'image/jpg') {
                             image = await pdfDoc.embedJpg(arrayBuffer);
                         } else {
                             // Try PNG first, then JPEG
@@ -1611,7 +1664,7 @@ export const generatePDFReport = async (
         // 3b. Prepare Signature image for XHR reports on page 5 - will be drawn last to appear on top
         if (reportType === 'XHR' && data.selectedInspectorId && inspectorDocuments) {
             try {
-                const inspectorDocs = inspectorDocuments.get(data.selectedInspectorId) || [];
+                const inspectorDocs = inspectorDocuments!.get(data.selectedInspectorId!) || [];
                 console.log(`🔍 XHR Signature Check - Inspector ID: ${data.selectedInspectorId}, Docs found: ${inspectorDocs.length}`);
                 // Find signature document (look for document type containing "signature")
                 const signatureDoc = inspectorDocs.find(doc => 
@@ -1635,7 +1688,7 @@ export const generatePDFReport = async (
                     });
                 }
 
-                if (signatureDoc && signatureDoc.file) {
+                if (signatureDoc?.file) {
                     try {
                         // Get page 5 (index 4) where Inspector sig field is located
                         const pages = pdfDoc.getPages();
@@ -1806,7 +1859,7 @@ export const generatePDFReport = async (
         // Position is configured via PAGE6_SIGNATURE_X and PAGE6_SIGNATURE_Y variables at top of function
         if (reportType === 'XHR' && data.selectedInspectorId && inspectorDocuments) {
             try {
-                const inspectorDocs = inspectorDocuments.get(data.selectedInspectorId) || [];
+                const inspectorDocs = inspectorDocuments!.get(data.selectedInspectorId!) || [];
                 console.log(`🔍 XHR Page 6 Signature Check - Inspector ID: ${data.selectedInspectorId}, Docs found: ${inspectorDocs.length}`);
                 // Find signature document (look for document type containing "signature")
                 const signatureDoc = inspectorDocs.find(doc => 
@@ -1830,7 +1883,7 @@ export const generatePDFReport = async (
                     });
                 }
 
-                if (signatureDoc && signatureDoc.file) {
+                if (signatureDoc?.file) {
                     try {
                         // Get page 6 - this is the page with the phone field
                         // After Excel pages are inserted before page 6, the page 6 index shifts
@@ -2136,24 +2189,24 @@ export const generatePDFReport = async (
         let certificatePage: any = null;
         if (false && reportType === 'XHR' && certificatePage && data.selectedInspectorId && inspectorDocuments) {
             try {
-                const inspectorDocs = inspectorDocuments.get(data.selectedInspectorId) || [];
+                const inspectorDocs = inspectorDocuments!.get(data.selectedInspectorId!) || [];
                 const signatureDoc = inspectorDocs.find(doc => 
                     doc.documentType?.toLowerCase().includes('signature')
                 );
 
-                if (signatureDoc && signatureDoc.file) {
+                if (signatureDoc?.file) {
                     try {
                         const sigX = 594.72;
                         const sigY = 106.56;
                         const sigWidth = 83.4;
                         const sigHeight = 50;
 
-                        const arrayBuffer = await signatureDoc.file.arrayBuffer();
+                        const arrayBuffer = await signatureDoc!.file.arrayBuffer();
                         let image;
                         
-                        if (signatureDoc.file.type === 'image/png') {
+                        if (signatureDoc!.file.type === 'image/png') {
                             image = await pdfDoc.embedPng(arrayBuffer);
-                        } else if (signatureDoc.file.type === 'image/jpeg' || signatureDoc.file.type === 'image/jpg') {
+                        } else if (signatureDoc!.file.type === 'image/jpeg' || signatureDoc!.file.type === 'image/jpg') {
                             image = await pdfDoc.embedJpg(arrayBuffer);
                         } else {
                             try {
@@ -2216,13 +2269,13 @@ export const generatePDFReport = async (
                 const widthMargin = 40; // 40px on each side = 80px total width margin
                 const heightMargin = 20; // 20px on top and bottom = 40px total height margin
                 
-                const whiteBoxX = signatureImageData.x - widthMargin; // Large margin on left
-                const whiteBoxY = signatureImageData.y - (heightMargin / 2); // Margin on bottom
-                const whiteBoxWidth = signatureImageData.width + (widthMargin * 2); // Much wider (20px on each side)
-                const whiteBoxHeight = signatureImageData.height + heightMargin; // Taller (10px on top and bottom)
+                const whiteBoxX = (signatureImageData as any).x - widthMargin; // Large margin on left
+                const whiteBoxY = (signatureImageData as any).y - (heightMargin / 2); // Margin on bottom
+                const whiteBoxWidth = (signatureImageData as any).width + (widthMargin * 2); // Much wider (20px on each side)
+                const whiteBoxHeight = (signatureImageData as any).height + heightMargin; // Taller (10px on top and bottom)
                 
                 // Draw white rectangle behind signature to block everything
-                signatureImageData.page.drawRectangle({
+                (signatureImageData as any).page.drawRectangle({
                     x: whiteBoxX,
                     y: whiteBoxY,
                     width: whiteBoxWidth,
@@ -2231,15 +2284,15 @@ export const generatePDFReport = async (
                 });
                 
                 // Draw the signature image on top of the white box
-                signatureImageData.page.drawImage(signatureImageData.image, {
-                    x: signatureImageData.x,
-                    y: signatureImageData.y,
-                    width: signatureImageData.width,
-                    height: signatureImageData.height,
+                (signatureImageData as any).page.drawImage((signatureImageData as any).image, {
+                    x: (signatureImageData as any).x,
+                    y: (signatureImageData as any).y,
+                    width: (signatureImageData as any).width,
+                    height: (signatureImageData as any).height,
                 });
                 
                 console.log(`White box drawn at: x=${whiteBoxX}, y=${whiteBoxY}, width=${whiteBoxWidth}, height=${whiteBoxHeight}`);
-                console.log(`Signature image drawn on top at: x=${signatureImageData.x}, y=${signatureImageData.y}, width=${signatureImageData.width}, height=${signatureImageData.height}`);
+                console.log(`Signature image drawn on top at: x=${(signatureImageData as any).x}, y=${(signatureImageData as any).y}, width=${(signatureImageData as any).width}, height=${(signatureImageData as any).height}`);
             } catch (err) {
                 console.warn('Error drawing signature image on top:', err);
             }
@@ -2458,7 +2511,7 @@ export const generatePDFReport = async (
 
         // 9. Save and Download
         const pdfBytes = await pdfDoc.save();
-        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+        const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         

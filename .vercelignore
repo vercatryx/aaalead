@@ -1,0 +1,4 @@
+lead-reports.db
+*.db
+.env.local
+node_modules

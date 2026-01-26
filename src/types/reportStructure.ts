@@ -24,5 +24,6 @@ export interface ReportConfig {
     id: string;
     name: string;
     templateUrl: string; // URL to the PDF template (e.g., /templates/file.pdf)
+    certifTemplateUrl?: string; // Optional certificate template URL
     mappings: FieldMapping[];
 }

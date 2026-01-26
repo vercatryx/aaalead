@@ -638,9 +638,9 @@ function App() {
           return newMap;
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting document:', error);
-      alert(`Failed to delete document: ${error.message || error}`);
+      alert(`Failed to delete document: ${error?.message || error}`);
     }
   };
 

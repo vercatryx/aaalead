@@ -1,62 +1,85 @@
-import { getDatabase } from './database.js';
+import { getDatabaseSync, isDatabaseAvailable } from './database.js';
+
+// Helper to safely call database functions
+function safeDbCall(fn, defaultValue = null) {
+  if (!isDatabaseAvailable()) {
+    return defaultValue;
+  }
+  try {
+    return fn();
+  } catch (error) {
+    console.error('Database error:', error);
+    return defaultValue;
+  }
+}
 
 // ==================== INSPECTORS ====================
 
 export function getAllInspectors() {
-  const db = getDatabase();
-  const inspectors = db.prepare('SELECT * FROM inspectors').all();
-  const variables = db.prepare('SELECT * FROM inspector_variables').all();
+  return safeDbCall(() => {
+    const db = getDatabaseSync();
+    const inspectors = db.prepare('SELECT * FROM inspectors').all();
+    const variables = db.prepare('SELECT * FROM inspector_variables').all();
   
-  // Group variables by inspector
-  const variableMap = new Map();
-  for (const v of variables) {
-    if (!variableMap.has(v.inspector_id)) {
-      variableMap.set(v.inspector_id, new Map());
+    // Group variables by inspector
+    const variableMap = new Map();
+    for (const v of variables) {
+      if (!variableMap.has(v.inspector_id)) {
+        variableMap.set(v.inspector_id, new Map());
+      }
+      variableMap.get(v.inspector_id).set(v.variable_name, v.value);
     }
-    variableMap.get(v.inspector_id).set(v.variable_name, v.value);
-  }
   
-  return inspectors.map(i => ({
-    id: i.id,
-    name: i.name,
-    variableValues: variableMap.get(i.id) || undefined
-  }));
+    return inspectors.map(i => ({
+      id: i.id,
+      name: i.name,
+      variableValues: variableMap.get(i.id) || undefined
+    }));
+  }, []);
 }
 
 export function getInspectorById(id) {
-  const db = getDatabase();
-  const inspector = db.prepare('SELECT * FROM inspectors WHERE id = ?').get(id);
-  if (!inspector) return null;
-  
-  const variables = db.prepare('SELECT * FROM inspector_variables WHERE inspector_id = ?').all(id);
-  const variableMap = new Map();
-  for (const v of variables) {
-    variableMap.set(v.variable_name, v.value);
-  }
-  
-  return {
-    id: inspector.id,
-    name: inspector.name,
-    variableValues: variableMap.size > 0 ? variableMap : undefined
-  };
+  return safeDbCall(() => {
+    const db = getDatabaseSync();
+    const inspector = db.prepare('SELECT * FROM inspectors WHERE id = ?').get(id);
+    if (!inspector) return null;
+    
+    const variables = db.prepare('SELECT * FROM inspector_variables WHERE inspector_id = ?').all(id);
+    const variableMap = new Map();
+    for (const v of variables) {
+      variableMap.set(v.variable_name, v.value);
+    }
+    
+    return {
+      id: inspector.id,
+      name: inspector.name,
+      variableValues: variableMap.size > 0 ? variableMap : undefined
+    };
+  }, null);
 }
 
 export function createInspector(id, name) {
-  const db = getDatabase();
-  db.prepare('INSERT OR REPLACE INTO inspectors (id, name) VALUES (?, ?)').run(id, name);
-  return getInspectorById(id);
+  return safeDbCall(() => {
+    const db = getDatabaseSync();
+    db.prepare('INSERT OR REPLACE INTO inspectors (id, name) VALUES (?, ?)').run(id, name);
+    return getInspectorById(id);
+  }, null);
 }
 
 export function updateInspector(id, name) {
-  const db = getDatabase();
-  const result = db.prepare('UPDATE inspectors SET name = ? WHERE id = ?').run(name, id);
-  if (result.changes === 0) return null;
-  return getInspectorById(id);
+  return safeDbCall(() => {
+    const db = getDatabaseSync();
+    const result = db.prepare('UPDATE inspectors SET name = ? WHERE id = ?').run(name, id);
+    if (result.changes === 0) return null;
+    return getInspectorById(id);
+  }, null);
 }
 
 export function deleteInspector(id) {
-  const db = getDatabase();
-  db.prepare('DELETE FROM inspectors WHERE id = ?').run(id);
+  safeDbCall(() => {
+    const db = getDatabaseSync();
+    db.prepare('DELETE FROM inspectors WHERE id = ?').run(id);
+  });
 }
 
 // ==================== INSPECTOR VARIABLES ====================
@@ -76,9 +99,11 @@ export function deleteInspectorVariable(inspectorId, variableName) {
 // ==================== INSPECTOR VARIABLE NAMES (Global) ====================
 
 export function getAllInspectorVariableNames() {
-  const db = getDatabase();
-  const rows = db.prepare('SELECT variable_name FROM inspector_variable_names ORDER BY variable_name').all();
-  return rows.map(r => r.variable_name);
+  return safeDbCall(() => {
+    const db = getDatabaseSync();
+    const rows = db.prepare('SELECT variable_name FROM inspector_variable_names ORDER BY variable_name').all();
+    return rows.map(r => r.variable_name);
+  }, []);
 }
 
 export function addInspectorVariableName(variableName) {
@@ -135,13 +160,15 @@ export function deleteDocumentType(type) {
 // ==================== GENERAL VARIABLES ====================
 
 export function getAllGeneralVariables() {
-  const db = getDatabase();
-  const rows = db.prepare('SELECT * FROM general_variables').all();
-  const map = new Map();
-  for (const row of rows) {
-    map.set(row.variable_name, row.value);
-  }
-  return map;
+  return safeDbCall(() => {
+    const db = getDatabaseSync();
+    const rows = db.prepare('SELECT * FROM general_variables').all();
+    const map = new Map();
+    for (const row of rows) {
+      map.set(row.variable_name, row.value);
+    }
+    return map;
+  }, new Map());
 }
 
 export function setGeneralVariable(variableName, value) {
@@ -158,42 +185,46 @@ export function deleteGeneralVariable(variableName) {
 // ==================== DOCUMENTS ====================
 
 export function getGeneralTypedDocuments() {
-  const db = getDatabase();
-  const rows = db.prepare('SELECT * FROM documents WHERE category = ?').all('general-typed');
-  const map = new Map();
-  for (const row of rows) {
-    map.set(row.document_type, {
-      id: row.id,
-      fileName: row.file_name,
-      uploadedAt: new Date(row.uploaded_at),
-      category: row.category,
-      documentType: row.document_type,
-      filePath: row.file_path
-    });
-  }
-  return map;
+  return safeDbCall(() => {
+    const db = getDatabaseSync();
+    const rows = db.prepare('SELECT * FROM documents WHERE category = ?').all('general-typed');
+    const map = new Map();
+    for (const row of rows) {
+      map.set(row.document_type, {
+        id: row.id,
+        fileName: row.file_name,
+        uploadedAt: new Date(row.uploaded_at),
+        category: row.category,
+        documentType: row.document_type,
+        filePath: row.file_path
+      });
+    }
+    return map;
+  }, new Map());
 }
 
 export function getInspectorDocuments() {
-  const db = getDatabase();
-  const rows = db.prepare('SELECT * FROM documents WHERE category = ?').all('inspector');
-  const map = new Map();
-  for (const row of rows) {
-    const inspectorId = row.inspector_id;
-    if (!map.has(inspectorId)) {
-      map.set(inspectorId, []);
+  return safeDbCall(() => {
+    const db = getDatabaseSync();
+    const rows = db.prepare('SELECT * FROM documents WHERE category = ?').all('inspector');
+    const map = new Map();
+    for (const row of rows) {
+      const inspectorId = row.inspector_id;
+      if (!map.has(inspectorId)) {
+        map.set(inspectorId, []);
+      }
+      map.get(inspectorId).push({
+        id: row.id,
+        fileName: row.file_name,
+        uploadedAt: new Date(row.uploaded_at),
+        category: row.category,
+        inspectorId: row.inspector_id,
+        documentType: row.document_type,
+        filePath: row.file_path
+      });
     }
-    map.get(inspectorId).push({
-      id: row.id,
-      fileName: row.file_name,
-      uploadedAt: new Date(row.uploaded_at),
-      category: row.category,
-      inspectorId: row.inspector_id,
-      documentType: row.document_type,
-      filePath: row.file_path
-    });
-  }
-  return map;
+    return map;
+  }, new Map());
 }
 
 export function getDocumentById(id) {

@@ -6,7 +6,7 @@ export async function GET() {
     const documents = dbModels.getInspectorDocuments();
     const result: Record<string, any[]> = {};
     for (const [key, value] of documents.entries()) {
-      result[key] = value.map(d => ({
+      result[key] = value.map((d: any) => ({
         id: d.id,
         fileName: d.fileName,
         uploadedAt: d.uploadedAt.toISOString(),

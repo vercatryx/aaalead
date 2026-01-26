@@ -134,18 +134,7 @@ export const StepUpload: React.FC<StepUploadProps> = ({ onUpload, reportType, on
             positiveReadings: extracted.positiveReadings || 0,
             fullExcelData: extracted.fullExcelData,
             headerRowIndex: extracted.headerRowIndex,
-
-            // PDF Field Mappings
-            'Inspection Location': extracted.address || '',
-            'Address': extracted.address || '',
-            'Date': extracted.date || '',
-            'Today': new Date().toISOString().split('T')[0],
-            'Numb1': extracted.totalReadings || 0,
-            'Numb2': extracted.positiveReadings || 0,
-            'Inspection Result': isPositive ? 'Not Lead Free' : 'Lead Free',
-            'Inspection Info 1': 'property',
-            'Inspection Info 2': ''
-        });
+        } as any);
     };
 
     const handleSheetSelect = (name: string) => {
