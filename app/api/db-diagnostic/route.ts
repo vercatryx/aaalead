@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getConnectionConfig, getDatabase, isDatabaseAvailable, resetDatabaseConnection } from '../../../db/database.js';
 import pg from 'pg';
+import type { PoolClient } from 'pg';
 const { Pool } = pg;
 
 export async function GET() {
@@ -51,13 +52,12 @@ export async function GET() {
     let freshTest = null;
     try {
       const testPool = new Pool(config);
-      const testClient = await Promise.race([
+      const testClient: PoolClient = await Promise.race([
         testPool.connect(),
-        new Promise((_, reject) => 
+        new Promise<never>((_, reject) => 
           setTimeout(() => reject(new Error('Connection timeout after 10 seconds')), 10000)
         )
       ]);
-      await testClient.query('SELECT NOW() as current_time');
       const result = await testClient.query('SELECT NOW() as current_time');
       testClient.release();
       await testPool.end();
