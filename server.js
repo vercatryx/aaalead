@@ -888,9 +888,9 @@ process.on('SIGINT', async () => {
   console.log('\n⚠️ Received SIGINT, closing database connection...');
   try {
     const { getDatabase } = await import('./db/database.js');
-    const db = getDatabase();
-    if (db && typeof db.close === 'function') {
-      db.close();
+    const pool = await getDatabase();
+    if (pool && typeof pool.end === 'function') {
+      await pool.end();
       console.log('✅ Database connection closed');
     }
   } catch (err) {

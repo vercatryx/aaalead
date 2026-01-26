@@ -3,7 +3,7 @@ import * as dbModels from '../../../../db/models.js';
 
 export async function GET() {
   try {
-    const documents = dbModels.getGeneralTypedDocuments();
+    const documents = await dbModels.getGeneralTypedDocuments();
     const result: Record<string, any> = {};
     for (const [key, value] of documents.entries()) {
       result[key] = {

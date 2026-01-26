@@ -3,7 +3,7 @@ import * as dbModels from '../../../../db/models.js';
 
 export async function GET() {
   try {
-    const documents = dbModels.getInspectorDocuments();
+    const documents = await dbModels.getInspectorDocuments();
     const result: Record<string, any[]> = {};
     for (const [key, value] of documents.entries()) {
       result[key] = value.map((d: any) => ({

@@ -7,11 +7,16 @@ export async function PUT(
 ) {
   try {
     const { variableName } = params;
-    const { value } = await request.json();
-    if (!value) {
+    const body = await request.json();
+    
+    // Allow empty strings - only reject if value is undefined or null
+    if (body.value === undefined || body.value === null) {
       return NextResponse.json({ error: 'value is required' }, { status: 400 });
     }
-    dbModels.setGeneralVariable(variableName, value);
+    
+    // Treat empty string as a valid value (variable exists but is empty)
+    const value = body.value === '' ? '' : String(body.value);
+    await dbModels.setGeneralVariable(variableName, value);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('Error setting general variable:', error);
@@ -25,7 +30,7 @@ export async function DELETE(
 ) {
   try {
     const { variableName } = params;
-    dbModels.deleteGeneralVariable(variableName);
+    await dbModels.deleteGeneralVariable(variableName);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting general variable:', error);

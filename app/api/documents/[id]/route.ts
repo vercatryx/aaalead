@@ -7,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { id } = params;
-    const document = dbModels.getDocumentById(id);
+    const document = await dbModels.getDocumentById(id);
     if (!document) {
       return NextResponse.json({ error: 'Document not found' }, { status: 404 });
     }
@@ -32,7 +32,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = params;
-    dbModels.deleteDocument(id);
+    await dbModels.deleteDocument(id);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting document:', error);

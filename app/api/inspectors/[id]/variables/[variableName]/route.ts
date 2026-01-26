@@ -9,9 +9,9 @@ export async function PUT(
     const { id, variableName } = params;
     const { value } = await request.json();
     if (value) {
-      dbModels.setInspectorVariable(id, variableName, value);
+      await dbModels.setInspectorVariable(id, variableName, value);
     } else {
-      dbModels.deleteInspectorVariable(id, variableName);
+      await dbModels.deleteInspectorVariable(id, variableName);
     }
     return NextResponse.json({ success: true });
   } catch (error: any) {
@@ -26,7 +26,7 @@ export async function DELETE(
 ) {
   try {
     const { id, variableName } = params;
-    dbModels.deleteInspectorVariable(id, variableName);
+    await dbModels.deleteInspectorVariable(id, variableName);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting inspector variable:', error);

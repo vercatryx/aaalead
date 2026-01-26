@@ -3,7 +3,7 @@ import * as dbModels from '../../../db/models.js';
 
 export async function GET() {
   try {
-    const data = dbModels.getAllData();
+    const data = await dbModels.getAllData();
     if (!data) {
       return NextResponse.json({ 
         error: 'Database is not available',

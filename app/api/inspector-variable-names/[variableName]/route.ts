@@ -7,7 +7,7 @@ export async function DELETE(
 ) {
   try {
     const { variableName } = params;
-    dbModels.deleteInspectorVariableName(variableName);
+    await dbModels.deleteInspectorVariableName(variableName);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting inspector variable name:', error);

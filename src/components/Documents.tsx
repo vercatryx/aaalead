@@ -299,15 +299,24 @@ export const Documents: React.FC<DocumentsProps> = ({
                 >
                   <FolderOpen size={16} />
                   <span className="flex-1 text-left truncate">{inspector.name}</span>
-                  <button
+                  <div
                     onClick={(e) => {
                       e.stopPropagation();
                       onDeleteInspector(inspector.id);
                     }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded text-red-600"
+                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded text-red-600 cursor-pointer"
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onDeleteInspector(inspector.id);
+                      }
+                    }}
                   >
                     <X size={12} />
-                  </button>
+                  </div>
                 </button>
               ))}
             </div>
@@ -343,7 +352,7 @@ export const Documents: React.FC<DocumentsProps> = ({
                     {generalTypedDocuments.has(docType) && (
                       <div className="w-1.5 h-1.5 rounded-full bg-green-500" title="Document exists" />
                     )}
-                    <button
+                    <div
                       onClick={(e) => {
                         e.stopPropagation();
                         onDeleteGeneralDocumentType(docType);
@@ -351,10 +360,22 @@ export const Documents: React.FC<DocumentsProps> = ({
                           setSelectedDocumentType(null);
                         }
                       }}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded text-red-600"
+                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded text-red-600 cursor-pointer"
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onDeleteGeneralDocumentType(docType);
+                          if (selectedDocumentType === docType) {
+                            setSelectedDocumentType(null);
+                          }
+                        }
+                      }}
                     >
                       <X size={12} />
-                    </button>
+                    </div>
                   </button>
                 ))}
                 <div className="mt-2 pt-2 border-t border-slate-100">
@@ -520,7 +541,7 @@ export const Documents: React.FC<DocumentsProps> = ({
                   >
                     <Folder size={16} />
                     <span className="flex-1 text-left">{docType}</span>
-                    <button
+                    <div
                       onClick={(e) => {
                         e.stopPropagation();
                         onDeleteInspectorDocumentType(docType);
@@ -528,10 +549,22 @@ export const Documents: React.FC<DocumentsProps> = ({
                           setSelectedDocumentType(null);
                         }
                       }}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded text-red-600"
+                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded text-red-600 cursor-pointer"
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onDeleteInspectorDocumentType(docType);
+                          if (selectedDocumentType === docType) {
+                            setSelectedDocumentType(null);
+                          }
+                        }
+                      }}
                     >
                       <X size={12} />
-                    </button>
+                    </div>
                   </button>
                 ))}
                 <div className="mt-2 pt-2 border-t border-slate-100">

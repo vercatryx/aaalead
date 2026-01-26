@@ -3,7 +3,7 @@ import * as dbModels from '../../../db/models.js';
 
 export async function GET() {
   try {
-    const variables = dbModels.getAllGeneralVariables();
+    const variables = await dbModels.getAllGeneralVariables();
     return NextResponse.json(Array.from(variables.entries()));
   } catch (error: any) {
     console.error('Error getting general variables:', error);

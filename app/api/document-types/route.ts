@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
     if (!type || !category) {
       return NextResponse.json({ error: 'type and category are required' }, { status: 400 });
     }
-    dbModels.addDocumentType(type, category);
+    await dbModels.addDocumentType(type, category);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('Error adding document type:', error);

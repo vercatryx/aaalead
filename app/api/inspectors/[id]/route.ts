@@ -7,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { id } = params;
-    const inspector = dbModels.getInspectorById(id);
+    const inspector = await dbModels.getInspectorById(id);
     if (!inspector) {
       return NextResponse.json({ error: 'Inspector not found' }, { status: 404 });
     }
@@ -32,7 +32,7 @@ export async function PUT(
     if (!name) {
       return NextResponse.json({ error: 'name is required' }, { status: 400 });
     }
-    const inspector = dbModels.updateInspector(id, name);
+    const inspector = await dbModels.updateInspector(id, name);
     if (!inspector) {
       return NextResponse.json({ error: 'Inspector not found' }, { status: 404 });
     }
@@ -53,7 +53,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = params;
-    dbModels.deleteInspector(id);
+    await dbModels.deleteInspector(id);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting inspector:', error);

@@ -1,12 +1,15 @@
-import { getDatabaseSync, isDatabaseAvailable } from './database.js';
+import { getDatabase, getDatabaseSync, isDatabaseAvailable } from './database.js';
 
 // Helper to safely call database functions
-function safeDbCall(fn, defaultValue = null) {
-  if (!isDatabaseAvailable()) {
-    return defaultValue;
-  }
+async function safeDbCall(fn, defaultValue = null) {
   try {
-    return fn();
+    // Always try to get the database - it will initialize if needed
+    const pool = await getDatabase();
+    if (!pool) {
+      console.warn('Database pool is null, returning default value');
+      return defaultValue;
+    }
+    return await fn();
   } catch (error) {
     console.error('Database error:', error);
     return defaultValue;
@@ -15,22 +18,22 @@ function safeDbCall(fn, defaultValue = null) {
 
 // ==================== INSPECTORS ====================
 
-export function getAllInspectors() {
-  return safeDbCall(() => {
-    const db = getDatabaseSync();
-    const inspectors = db.prepare('SELECT * FROM inspectors').all();
-    const variables = db.prepare('SELECT * FROM inspector_variables').all();
+export async function getAllInspectors() {
+  return safeDbCall(async () => {
+    const pool = await getDatabase();
+    const inspectorsResult = await pool.query('SELECT * FROM inspectors');
+    const variablesResult = await pool.query('SELECT * FROM inspector_variables');
   
     // Group variables by inspector
     const variableMap = new Map();
-    for (const v of variables) {
+    for (const v of variablesResult.rows) {
       if (!variableMap.has(v.inspector_id)) {
         variableMap.set(v.inspector_id, new Map());
       }
       variableMap.get(v.inspector_id).set(v.variable_name, v.value);
     }
   
-    return inspectors.map(i => ({
+    return inspectorsResult.rows.map(i => ({
       id: i.id,
       name: i.name,
       variableValues: variableMap.get(i.id) || undefined
@@ -38,15 +41,16 @@ export function getAllInspectors() {
   }, []);
 }
 
-export function getInspectorById(id) {
-  return safeDbCall(() => {
-    const db = getDatabaseSync();
-    const inspector = db.prepare('SELECT * FROM inspectors WHERE id = ?').get(id);
-    if (!inspector) return null;
+export async function getInspectorById(id) {
+  return safeDbCall(async () => {
+    const pool = await getDatabase();
+    const inspectorResult = await pool.query('SELECT * FROM inspectors WHERE id = $1', [id]);
+    if (inspectorResult.rows.length === 0) return null;
     
-    const variables = db.prepare('SELECT * FROM inspector_variables WHERE inspector_id = ?').all(id);
+    const inspector = inspectorResult.rows[0];
+    const variablesResult = await pool.query('SELECT * FROM inspector_variables WHERE inspector_id = $1', [id]);
     const variableMap = new Map();
-    for (const v of variables) {
+    for (const v of variablesResult.rows) {
       variableMap.set(v.variable_name, v.value);
     }
     
@@ -58,138 +62,144 @@ export function getInspectorById(id) {
   }, null);
 }
 
-export function createInspector(id, name) {
-  return safeDbCall(() => {
-    const db = getDatabaseSync();
-    db.prepare('INSERT OR REPLACE INTO inspectors (id, name) VALUES (?, ?)').run(id, name);
-    return getInspectorById(id);
+export async function createInspector(id, name) {
+  return safeDbCall(async () => {
+    const pool = await getDatabase();
+    await pool.query(
+      'INSERT INTO inspectors (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = $2',
+      [id, name]
+    );
+    return await getInspectorById(id);
   }, null);
 }
 
-export function updateInspector(id, name) {
-  return safeDbCall(() => {
-    const db = getDatabaseSync();
-    const result = db.prepare('UPDATE inspectors SET name = ? WHERE id = ?').run(name, id);
-    if (result.changes === 0) return null;
-    return getInspectorById(id);
+export async function updateInspector(id, name) {
+  return safeDbCall(async () => {
+    const pool = await getDatabase();
+    const result = await pool.query('UPDATE inspectors SET name = $1 WHERE id = $2', [name, id]);
+    if (result.rowCount === 0) return null;
+    return await getInspectorById(id);
   }, null);
 }
 
-export function deleteInspector(id) {
-  safeDbCall(() => {
-    const db = getDatabaseSync();
-    db.prepare('DELETE FROM inspectors WHERE id = ?').run(id);
+export async function deleteInspector(id) {
+  await safeDbCall(async () => {
+    const pool = await getDatabase();
+    await pool.query('DELETE FROM inspectors WHERE id = $1', [id]);
   });
 }
 
 // ==================== INSPECTOR VARIABLES ====================
 
-export function setInspectorVariable(inspectorId, variableName, value) {
-  const db = getDatabase();
-  db.prepare('INSERT OR REPLACE INTO inspector_variables (inspector_id, variable_name, value) VALUES (?, ?, ?)')
-    .run(inspectorId, variableName, value);
+export async function setInspectorVariable(inspectorId, variableName, value) {
+  const pool = await getDatabase();
+  await pool.query(
+    'INSERT INTO inspector_variables (inspector_id, variable_name, value) VALUES ($1, $2, $3) ON CONFLICT (inspector_id, variable_name) DO UPDATE SET value = $3',
+    [inspectorId, variableName, value]
+  );
 }
 
-export function deleteInspectorVariable(inspectorId, variableName) {
-  const db = getDatabase();
-  db.prepare('DELETE FROM inspector_variables WHERE inspector_id = ? AND variable_name = ?')
-    .run(inspectorId, variableName);
+export async function deleteInspectorVariable(inspectorId, variableName) {
+  const pool = await getDatabase();
+  await pool.query('DELETE FROM inspector_variables WHERE inspector_id = $1 AND variable_name = $2', [inspectorId, variableName]);
 }
 
 // ==================== INSPECTOR VARIABLE NAMES (Global) ====================
 
-export function getAllInspectorVariableNames() {
-  return safeDbCall(() => {
-    const db = getDatabaseSync();
-    const rows = db.prepare('SELECT variable_name FROM inspector_variable_names ORDER BY variable_name').all();
-    return rows.map(r => r.variable_name);
+export async function getAllInspectorVariableNames() {
+  return safeDbCall(async () => {
+    const pool = await getDatabase();
+    const result = await pool.query('SELECT variable_name FROM inspector_variable_names ORDER BY variable_name');
+    return result.rows.map(r => r.variable_name);
   }, []);
 }
 
-export function addInspectorVariableName(variableName) {
-  const db = getDatabase();
+export async function addInspectorVariableName(variableName) {
+  const pool = await getDatabase();
   try {
-    db.prepare('INSERT INTO inspector_variable_names (variable_name) VALUES (?)').run(variableName);
+    await pool.query('INSERT INTO inspector_variable_names (variable_name) VALUES ($1)', [variableName]);
     return true;
   } catch (error) {
     // Ignore if already exists
-    if (error.message.includes('UNIQUE')) return false;
+    if (error.code === '23505') return false; // Unique violation
     throw error;
   }
 }
 
-export function deleteInspectorVariableName(variableName) {
-  const db = getDatabase();
+export async function deleteInspectorVariableName(variableName) {
+  const pool = await getDatabase();
   // Delete from global list
-  db.prepare('DELETE FROM inspector_variable_names WHERE variable_name = ?').run(variableName);
+  await pool.query('DELETE FROM inspector_variable_names WHERE variable_name = $1', [variableName]);
   // Delete all values for this variable
-  db.prepare('DELETE FROM inspector_variables WHERE variable_name = ?').run(variableName);
+  await pool.query('DELETE FROM inspector_variables WHERE variable_name = $1', [variableName]);
 }
 
 // ==================== DOCUMENT TYPES ====================
 
-export function getDocumentTypes(category) {
-  const db = getDatabase();
-  const rows = db.prepare('SELECT type FROM document_types WHERE category = ? ORDER BY type').all(category);
-  return rows.map(r => r.type);
+export async function getDocumentTypes(category) {
+  const pool = await getDatabase();
+  const result = await pool.query('SELECT type FROM document_types WHERE category = $1 ORDER BY type', [category]);
+  return result.rows.map(r => r.type);
 }
 
-export function documentTypeExists(type) {
-  const db = getDatabase();
-  const row = db.prepare('SELECT 1 FROM document_types WHERE type = ?').get(type);
-  return !!row;
+export async function documentTypeExists(type) {
+  const pool = await getDatabase();
+  const result = await pool.query('SELECT 1 FROM document_types WHERE type = $1', [type]);
+  return result.rows.length > 0;
 }
 
-export function addDocumentType(type, category) {
-  const db = getDatabase();
+export async function addDocumentType(type, category) {
+  const pool = await getDatabase();
   try {
-    db.prepare('INSERT INTO document_types (type, category) VALUES (?, ?)').run(type, category);
+    await pool.query('INSERT INTO document_types (type, category) VALUES ($1, $2)', [type, category]);
     return true;
   } catch (error) {
     // Ignore if already exists
-    if (error.message.includes('UNIQUE')) return false;
+    if (error.code === '23505') return false; // Unique violation
     throw error;
   }
 }
 
-export function deleteDocumentType(type) {
-  const db = getDatabase();
-  db.prepare('DELETE FROM document_types WHERE type = ?').run(type);
+export async function deleteDocumentType(type) {
+  const pool = await getDatabase();
+  await pool.query('DELETE FROM document_types WHERE type = $1', [type]);
 }
 
 // ==================== GENERAL VARIABLES ====================
 
-export function getAllGeneralVariables() {
-  return safeDbCall(() => {
-    const db = getDatabaseSync();
-    const rows = db.prepare('SELECT * FROM general_variables').all();
+export async function getAllGeneralVariables() {
+  return safeDbCall(async () => {
+    const pool = await getDatabase();
+    const result = await pool.query('SELECT * FROM general_variables');
     const map = new Map();
-    for (const row of rows) {
+    for (const row of result.rows) {
       map.set(row.variable_name, row.value);
     }
     return map;
   }, new Map());
 }
 
-export function setGeneralVariable(variableName, value) {
-  const db = getDatabase();
-  db.prepare('INSERT OR REPLACE INTO general_variables (variable_name, value) VALUES (?, ?)')
-    .run(variableName, value);
+export async function setGeneralVariable(variableName, value) {
+  const pool = await getDatabase();
+  await pool.query(
+    'INSERT INTO general_variables (variable_name, value) VALUES ($1, $2) ON CONFLICT (variable_name) DO UPDATE SET value = $2',
+    [variableName, value]
+  );
 }
 
-export function deleteGeneralVariable(variableName) {
-  const db = getDatabase();
-  db.prepare('DELETE FROM general_variables WHERE variable_name = ?').run(variableName);
+export async function deleteGeneralVariable(variableName) {
+  const pool = await getDatabase();
+  await pool.query('DELETE FROM general_variables WHERE variable_name = $1', [variableName]);
 }
 
 // ==================== DOCUMENTS ====================
 
-export function getGeneralTypedDocuments() {
-  return safeDbCall(() => {
-    const db = getDatabaseSync();
-    const rows = db.prepare('SELECT * FROM documents WHERE category = ?').all('general-typed');
+export async function getGeneralTypedDocuments() {
+  return safeDbCall(async () => {
+    const pool = await getDatabase();
+    const result = await pool.query('SELECT * FROM documents WHERE category = $1', ['general-typed']);
     const map = new Map();
-    for (const row of rows) {
+    for (const row of result.rows) {
       map.set(row.document_type, {
         id: row.id,
         fileName: row.file_name,
@@ -203,12 +213,12 @@ export function getGeneralTypedDocuments() {
   }, new Map());
 }
 
-export function getInspectorDocuments() {
-  return safeDbCall(() => {
-    const db = getDatabaseSync();
-    const rows = db.prepare('SELECT * FROM documents WHERE category = ?').all('inspector');
+export async function getInspectorDocuments() {
+  return safeDbCall(async () => {
+    const pool = await getDatabase();
+    const result = await pool.query('SELECT * FROM documents WHERE category = $1', ['inspector']);
     const map = new Map();
-    for (const row of rows) {
+    for (const row of result.rows) {
       const inspectorId = row.inspector_id;
       if (!map.has(inspectorId)) {
         map.set(inspectorId, []);
@@ -227,49 +237,69 @@ export function getInspectorDocuments() {
   }, new Map());
 }
 
-export function getDocumentById(id) {
-  const db = getDatabase();
-  return db.prepare('SELECT * FROM documents WHERE id = ?').get(id);
+export async function getDocumentById(id) {
+  const pool = await getDatabase();
+  const result = await pool.query('SELECT * FROM documents WHERE id = $1', [id]);
+  return result.rows[0] || null;
 }
 
-export function getDocumentsByCategory(category, documentType, inspectorId) {
-  const db = getDatabase();
+export async function getDocumentsByCategory(category, documentType, inspectorId) {
+  const pool = await getDatabase();
   if (category === 'inspector' && inspectorId) {
-    return db.prepare('SELECT * FROM documents WHERE category = ? AND document_type = ? AND inspector_id = ?')
-      .all(category, documentType, inspectorId);
+    const result = await pool.query(
+      'SELECT * FROM documents WHERE category = $1 AND document_type = $2 AND inspector_id = $3',
+      [category, documentType, inspectorId]
+    );
+    return result.rows;
   }
-  return db.prepare('SELECT * FROM documents WHERE category = ? AND document_type = ?')
-    .all(category, documentType);
+  const result = await pool.query(
+    'SELECT * FROM documents WHERE category = $1 AND document_type = $2',
+    [category, documentType]
+  );
+  return result.rows;
 }
 
-export function deleteDocumentByType(documentType, category) {
-  const db = getDatabase();
-  db.prepare('DELETE FROM documents WHERE document_type = ? AND category = ?').run(documentType, category);
+export async function deleteDocumentByType(documentType, category) {
+  const pool = await getDatabase();
+  await pool.query('DELETE FROM documents WHERE document_type = $1 AND category = $2', [documentType, category]);
 }
 
-export function createDocument(id, fileName, filePath, category, documentType, inspectorId) {
-  const db = getDatabase();
-  db.prepare(`
-    INSERT OR REPLACE INTO documents 
-    (id, file_name, file_path, category, document_type, inspector_id) 
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, fileName, filePath, category, documentType || null, inspectorId || null);
-  return getDocumentById(id);
+export async function createDocument(id, fileName, filePath, category, documentType, inspectorId) {
+  const pool = await getDatabase();
+  await pool.query(
+    `INSERT INTO documents 
+     (id, file_name, file_path, category, document_type, inspector_id) 
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (id) DO UPDATE SET 
+       file_name = $2, 
+       file_path = $3, 
+       category = $4, 
+       document_type = $5, 
+       inspector_id = $6`,
+    [id, fileName, filePath, category, documentType || null, inspectorId || null]
+  );
+  return await getDocumentById(id);
 }
 
-export function deleteDocument(id) {
-  const db = getDatabase();
-  db.prepare('DELETE FROM documents WHERE id = ?').run(id);
+export async function deleteDocument(id) {
+  const pool = await getDatabase();
+  await pool.query('DELETE FROM documents WHERE id = $1', [id]);
 }
 
 // ==================== ALL DATA ====================
 
-export function getAllData() {
+export async function getAllData() {
+  const inspectors = await getAllInspectors();
+  const generalVariables = await getAllGeneralVariables();
+  const inspectorVariableNames = await getAllInspectorVariableNames();
+  const generalTypedDocuments = await getGeneralTypedDocuments();
+  const inspectorDocuments = await getInspectorDocuments();
+  
   return {
-    inspectors: getAllInspectors(),
-    generalVariables: Array.from(getAllGeneralVariables().entries()),
-    inspectorVariableNames: getAllInspectorVariableNames(),
-    generalTypedDocuments: Array.from(getGeneralTypedDocuments().entries()),
-    inspectorDocuments: Array.from(getInspectorDocuments().entries())
+    inspectors: inspectors,
+    generalVariables: Array.from(generalVariables.entries()),
+    inspectorVariableNames: inspectorVariableNames,
+    generalTypedDocuments: Array.from(generalTypedDocuments.entries()),
+    inspectorDocuments: Array.from(inspectorDocuments.entries())
   };
 }

@@ -2,6 +2,10 @@
 # cloudflare accout
 aalead@vercatryx.com
 LeadClean^4
+or
+LeadClean^467 for the db
+
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

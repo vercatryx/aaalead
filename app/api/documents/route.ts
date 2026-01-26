@@ -14,8 +14,8 @@ export async function POST(request: NextRequest) {
       const categoryForDocType = category === 'general-typed' ? 'general' : category;
       const trimmedDocumentType = documentType.trim();
       
-      if (!dbModels.documentTypeExists(trimmedDocumentType)) {
-        dbModels.addDocumentType(trimmedDocumentType, categoryForDocType);
+      if (!(await dbModels.documentTypeExists(trimmedDocumentType))) {
+        await dbModels.addDocumentType(trimmedDocumentType, categoryForDocType);
       }
     }
     
@@ -24,9 +24,9 @@ export async function POST(request: NextRequest) {
     
     // Verify inspector exists if provided
     if (finalInspectorId) {
-      const inspector = dbModels.getInspectorById(finalInspectorId);
+      const inspector = await dbModels.getInspectorById(finalInspectorId);
       if (!inspector) {
-        const allInspectors = dbModels.getAllInspectors();
+        const allInspectors = await dbModels.getAllInspectors();
         return NextResponse.json({ 
           error: `Inspector with id "${finalInspectorId}" does not exist. Please create the inspector first.`,
           hint: 'Make sure the inspector is created before uploading documents for that inspector.',
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     // Delete old documents for general-typed
     if (category === 'general-typed' && finalDocumentType) {
       try {
-        dbModels.deleteDocumentByType(finalDocumentType, category);
+        await dbModels.deleteDocumentByType(finalDocumentType, category);
       } catch (deleteError) {
         console.warn('Warning: Could not delete old documents:', deleteError);
       }
@@ -51,10 +51,10 @@ export async function POST(request: NextRequest) {
     
     // Check if document exists and delete if needed
     let finalId = id;
-    const existingDocById = dbModels.getDocumentById(id);
+    const existingDocById = await dbModels.getDocumentById(id);
     if (existingDocById) {
       try {
-        dbModels.deleteDocument(id);
+        await dbModels.deleteDocument(id);
       } catch (deleteError) {
         finalId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
       }
@@ -63,15 +63,15 @@ export async function POST(request: NextRequest) {
     // Delete duplicates for inspector documents
     if (category === 'inspector' && finalInspectorId && finalDocumentType) {
       try {
-        const existingDocs = dbModels.getDocumentsByCategory('inspector', finalDocumentType, finalInspectorId);
+        const existingDocs = await dbModels.getDocumentsByCategory('inspector', finalDocumentType, finalInspectorId);
         const otherDocs = existingDocs.filter((doc: any) => doc.id !== finalId);
-        otherDocs.forEach((doc: any) => {
+        for (const doc of otherDocs) {
           try {
-            dbModels.deleteDocument(doc.id);
+            await dbModels.deleteDocument(doc.id);
           } catch (err) {
             console.warn(`Could not delete duplicate ${doc.id}:`, err);
           }
-        });
+        }
       } catch (deleteError) {
         console.warn('Warning: Could not check/delete old documents:', deleteError);
       }
@@ -80,12 +80,12 @@ export async function POST(request: NextRequest) {
     // Create document
     let document;
     try {
-      document = dbModels.createDocument(finalId, fileName, filePath, category, finalDocumentType, finalInspectorId);
+      document = await dbModels.createDocument(finalId, fileName, filePath, category, finalDocumentType, finalInspectorId);
     } catch (error: any) {
-      if (error.message && (error.message.includes('UNIQUE constraint') || error.message.includes('UNIQUE'))) {
+      if (error.message && (error.message.includes('UNIQUE constraint') || error.message.includes('UNIQUE') || error.code === '23505')) {
         try {
-          dbModels.deleteDocument(finalId);
-          document = dbModels.createDocument(finalId, fileName, filePath, category, finalDocumentType, finalInspectorId);
+          await dbModels.deleteDocument(finalId);
+          document = await dbModels.createDocument(finalId, fileName, filePath, category, finalDocumentType, finalInspectorId);
         } catch (retryError) {
           throw retryError;
         }
@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
     }
     
     if (!document) {
-      document = dbModels.getDocumentById(finalId);
+      document = await dbModels.getDocumentById(finalId);
       if (!document) {
         throw new Error(`Failed to create or retrieve document with id ${finalId}`);
       }

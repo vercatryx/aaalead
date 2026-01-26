@@ -33,6 +33,8 @@ const nextConfig = {
         https: false,
         assert: false,
         os: false,
+        pg: false,
+        'pg-native': false,
       };
     }
     
@@ -43,11 +45,14 @@ const nextConfig = {
     };
     
     // Ignore canvas and other Node.js modules in client bundle
-    config.externals = config.externals || [];
     if (!isServer) {
-      config.externals.push({
-        canvas: 'canvas',
-      });
+      // Externalize Node.js-only modules for client bundle
+      if (typeof config.externals === 'undefined') {
+        config.externals = [];
+      } else if (!Array.isArray(config.externals)) {
+        config.externals = [config.externals];
+      }
+      config.externals.push('pg', 'pg-native', 'canvas');
     }
     
     // Ignore dynamic worker imports in pdfjs-dist
