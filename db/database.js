@@ -14,42 +14,75 @@ let dbInitialized = false;
 // Using Session Pooler connection string for IPv4 compatibility
 
 export function getConnectionConfig() {
-  // IMPORTANT: The direct connection is IPv6-only and not IPv4 compatible
-  // We MUST use the Session Pooler connection string for IPv4 networks
-  // Session mode (port 5432) supports prepared statements and is IPv4 compatible
+  // Get credentials from environment variables
+  const PROJECT_REF = process.env.SUPABASE_PROJECT_REF;
+  const PASSWORD = process.env.SUPABASE_DB_PASSWORD;
   
-  const PROJECT_REF = 'hxsjkzatrfefeojvaitn';
-  const PASSWORD = 'LeadClean^467';
+  // Default to direct connection (faster and more reliable)
+  // Set SUPABASE_USE_POOLER=true to use pooler instead
+  const useDirectConnection = process.env.SUPABASE_USE_POOLER !== 'true' && process.env.SUPABASE_USE_POOLER !== '1';
   
-  // Use Session Pooler connection string (IPv4 compatible, supports prepared statements)
-  // Format: postgresql://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
-  // Verified working region: us-west-2
-  const region = process.env.SUPABASE_POOLER_REGION || 'us-west-2';
-  const defaultPoolerConnectionString = `postgresql://postgres.${PROJECT_REF}:${encodeURIComponent(PASSWORD)}@aws-0-${region}.pooler.supabase.com:5432/postgres`;
+  // If DATABASE_URL is provided, use it directly
+  if (process.env.DATABASE_URL) {
+    return {
+      connectionString: process.env.DATABASE_URL,
+      ssl: {
+        rejectUnauthorized: false // Supabase requires SSL
+      },
+      // Connection pool settings
+      max: 20, // More connections allowed for direct connection
+      idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
+      connectionTimeoutMillis: 10000, // Return an error after 10 seconds if connection cannot be established
+      allowExitOnIdle: true, // Allow pool to close when idle
+    };
+  }
   
-  // Use DATABASE_URL if provided, otherwise use pooler connection string
-  const connectionString = process.env.DATABASE_URL || defaultPoolerConnectionString;
+  // Validate required environment variables
+  if (!PROJECT_REF || !PASSWORD) {
+    throw new Error(
+      'Missing required Supabase credentials. Please set either DATABASE_URL or both SUPABASE_PROJECT_REF and SUPABASE_DB_PASSWORD in your .env.local file.'
+    );
+  }
+  
+  let connectionString;
+  let connectionType;
+  let poolConfig;
+  
+  if (useDirectConnection) {
+    // Use direct connection (IPv6 only, but faster and more reliable)
+    // Format: postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
+    connectionString = `postgresql://postgres:${encodeURIComponent(PASSWORD)}@db.${PROJECT_REF}.supabase.co:5432/postgres`;
+    connectionType = 'Direct connection (IPv6)';
+    poolConfig = {
+      max: 20, // More connections allowed for direct connection
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+      allowExitOnIdle: true,
+    };
+  } else {
+    // Use Session Pooler connection string (IPv4 compatible, supports prepared statements)
+    // Format: postgresql://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
+    const region = process.env.SUPABASE_POOLER_REGION || 'us-west-2';
+    connectionString = `postgresql://postgres.${PROJECT_REF}:${encodeURIComponent(PASSWORD)}@aws-0-${region}.pooler.supabase.com:5432/postgres`;
+    connectionType = 'Session Pooler (IPv4 compatible)';
+    poolConfig = {
+      max: 10, // Reduced for Session Pooler limits
+      idleTimeoutMillis: 10000,
+      connectionTimeoutMillis: 5000,
+      allowExitOnIdle: true,
+    };
+  }
   
   // Log which connection string is being used (for debugging)
-  if (process.env.DATABASE_URL) {
-    console.log('🔧 Using DATABASE_URL from environment variable');
-  } else {
-    console.log('🔧 Using default Supabase Session Pooler connection string');
-  }
-  console.log('🔧 Connection host:', connectionString.includes('pooler.supabase.com') ? 'Session Pooler (IPv4 compatible)' : 'Direct connection (IPv6 only)');
+  console.log(`🔧 Using ${connectionType}`);
+  console.log(`🔧 Connection: ${useDirectConnection ? 'Direct (faster)' : 'Pooler (IPv4 compatible)'}`);
   
   return {
     connectionString: connectionString,
     ssl: {
       rejectUnauthorized: false // Supabase requires SSL
     },
-    // Connection pool settings
-    // Supabase Session Pooler has a limit (typically 15 connections)
-    // Reduce pool size to avoid "max clients reached" errors
-    max: 10, // Maximum number of clients in the pool (reduced for Supabase Session Pooler)
-    idleTimeoutMillis: 10000, // Close idle clients after 10 seconds (faster cleanup)
-    connectionTimeoutMillis: 5000, // Return an error after 5 seconds if connection cannot be established
-    allowExitOnIdle: true, // Allow pool to close when idle
+    ...poolConfig,
   };
 }
 
@@ -60,16 +93,26 @@ async function initializeDatabaseModule() {
   dbInitialized = true;
   
   try {
+    // Debug: Log environment variables (without exposing secrets)
+    console.log('🔍 Environment variables check:', {
+      hasDATABASE_URL: !!process.env.DATABASE_URL,
+      hasSUPABASE_PROJECT_REF: !!process.env.SUPABASE_PROJECT_REF,
+      hasSUPABASE_DB_PASSWORD: !!process.env.SUPABASE_DB_PASSWORD,
+      SUPABASE_PROJECT_REF_length: process.env.SUPABASE_PROJECT_REF?.length || 0,
+      SUPABASE_DB_PASSWORD_length: process.env.SUPABASE_DB_PASSWORD?.length || 0,
+    });
+    
     const config = getConnectionConfig();
     console.log('🔌 Attempting to connect to PostgreSQL database...');
     
     const masked = config.connectionString.replace(/:[^:@]+@/, ':****@');
     console.log('🔌 Using connection string (masked):', masked);
     
-    // Verify we're using the pooler, not the direct connection
-    if (config.connectionString.includes('db.hxsjkzatrfefeojvaitn.supabase.co')) {
-      console.error('❌ WARNING: Using direct connection (IPv6 only)! This will fail on IPv4 networks.');
-      console.error('❌ Please use the Session Pooler connection string instead.');
+    // Log connection type
+    if (config.connectionString.includes('db.') && config.connectionString.includes('.supabase.co')) {
+      console.log('✅ Using direct connection (faster, IPv6)');
+    } else if (config.connectionString.includes('pooler.supabase.com')) {
+      console.log('✅ Using pooler connection (IPv4 compatible)');
     }
     
     pool = new Pool(config);

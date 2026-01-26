@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as dbModels from '../../../db/models.js';
 
 export async function POST(request: NextRequest) {
   try {
+    const dbModels = await import('../../../db/models.js');
     const { type, category } = await request.json();
     if (!type || !category) {
       return NextResponse.json({ error: 'type and category are required' }, { status: 400 });

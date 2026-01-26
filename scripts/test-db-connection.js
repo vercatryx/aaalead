@@ -3,11 +3,26 @@ import pg from 'pg';
 const { Pool } = pg;
 import dns from 'dns/promises';
 
-const HOSTNAME = 'db.hxsjkzatrfefeojvaitn.supabase.co';
-const PORT = 5432;
-const DATABASE = 'postgres';
-const USER = 'postgres';
-const PASSWORD = 'LeadClean^467';
+// Load environment variables (optional - Next.js handles this automatically)
+try {
+  const dotenv = (await import('dotenv')).default;
+  dotenv.config({ path: '.env.local' });
+} catch (e) {
+  // dotenv not installed, assume environment variables are set
+  console.log('Note: dotenv not found, using environment variables directly');
+}
+
+const HOSTNAME = process.env.SUPABASE_HOSTNAME || 'db.hxsjkzatrfefeojvaitn.supabase.co';
+const PORT = parseInt(process.env.SUPABASE_PORT || '5432');
+const DATABASE = process.env.SUPABASE_DATABASE || 'postgres';
+const USER = process.env.SUPABASE_USER || 'postgres';
+const PASSWORD = process.env.SUPABASE_DB_PASSWORD;
+
+if (!PASSWORD) {
+  console.error('❌ Error: SUPABASE_DB_PASSWORD environment variable is not set');
+  console.error('   Please set it in your .env.local file');
+  process.exit(1);
+}
 const KNOWN_IPV6 = '2600:1f13:838:6e12:6d71:b3c1:520c:36af';
 
 console.log('=== Database Connection Test ===\n');

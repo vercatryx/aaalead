@@ -17,11 +17,7 @@ The issue had **two parts**:
 - This caused DNS resolution to fail: `getaddrinfo ENOTFOUND`
 
 ### 2. Environment Variable Override
-- The `.env.local` file contained:
-  ```
-  DATABASE_URL=postgresql://postgres:LeadClean^467@db.hxsjkzatrfefeojvaitn.supabase.co:5432/postgres
-  ```
-- This **direct connection string** was overriding the pooler connection string in the code
+- The `.env.local` file contained a direct connection string that was overriding the pooler connection string in the code
 - Even though the code was updated to use the Session Pooler, the environment variable took precedence
 
 ## The Solution
@@ -31,13 +27,15 @@ Changed from direct connection (IPv6-only) to Session Pooler (IPv4 compatible):
 
 **Before:**
 ```
-DATABASE_URL=postgresql://postgres:LeadClean^467@db.hxsjkzatrfefeojvaitn.supabase.co:5432/postgres
+DATABASE_URL=postgresql://postgres:[PASSWORD]@db.hxsjkzatrfefeojvaitn.supabase.co:5432/postgres
 ```
 
 **After:**
 ```
-DATABASE_URL=postgresql://postgres.hxsjkzatrfefeojvaitn:LeadClean%5E467@aws-0-us-west-2.pooler.supabase.com:5432/postgres
+DATABASE_URL=postgresql://postgres.hxsjkzatrfefeojvaitn:[PASSWORD]@aws-0-us-west-2.pooler.supabase.com:5432/postgres
 ```
+
+**Note:** Replace `[PASSWORD]` with your actual database password (URL-encoded if it contains special characters)
 
 ### Key Differences:
 1. **Hostname**: `db.hxsjkzatrfefeojvaitn.supabase.co` → `aws-0-us-west-2.pooler.supabase.com`

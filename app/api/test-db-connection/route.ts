@@ -46,7 +46,27 @@ export async function GET() {
   }
 
   // Test 3: Try connection with current connection string
-  const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:LeadClean%5E467@db.hxsjkzatrfefeojvaitn.supabase.co:5432/postgres';
+  // Note: If DATABASE_URL is not set, this test will fail - which is expected
+  // Users should set DATABASE_URL in their .env.local file
+  if (!process.env.DATABASE_URL) {
+    results.tests.push({
+      name: 'Database connection',
+      status: 'skipped',
+      message: 'DATABASE_URL environment variable is not set. Please configure it in your .env.local file.'
+    });
+    results.instructions = [
+      '1. Go to your Supabase Dashboard: https://supabase.com/dashboard',
+      '2. Select your project',
+      '3. Go to Settings → Database',
+      '4. Find the "Connection string" section',
+      '5. Copy the "URI" connection string (it should look like: postgresql://postgres:[YOUR-PASSWORD]@db.xxx.supabase.co:5432/postgres)',
+      '6. Update the DATABASE_URL environment variable in your .env.local file',
+      '7. Make sure your Supabase project is not paused'
+    ];
+    return NextResponse.json(results, { status: 200 });
+  }
+  
+  const connectionString = process.env.DATABASE_URL;
   
   let pool = null;
   try {

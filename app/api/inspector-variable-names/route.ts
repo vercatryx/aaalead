@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as dbModels from '../../../db/models.js';
 
 export async function GET() {
   try {
+    const dbModels = await import('../../../db/models.js');
     const names = await dbModels.getAllInspectorVariableNames();
     return NextResponse.json(names);
   } catch (error: any) {
@@ -13,6 +13,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const dbModels = await import('../../../db/models.js');
     const { variableName } = await request.json();
     if (!variableName) {
       return NextResponse.json({ error: 'variableName is required' }, { status: 400 });

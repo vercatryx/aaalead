@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
-import * as dbModels from '../../../db/models.js';
 
 export async function GET() {
   try {
+    // Dynamic import to ensure it's only loaded on the server
+    const dbModels = await import('../../../db/models.js');
     const data = await dbModels.getAllData();
     if (!data) {
       return NextResponse.json({ 

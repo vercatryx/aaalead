@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as dbModels from '../../../../db/models.js';
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: { variableName: string } }
 ) {
   try {
+    const dbModels = await import('../../../../db/models.js');
     const { variableName } = params;
     const body = await request.json();
     
@@ -29,6 +29,7 @@ export async function DELETE(
   { params }: { params: { variableName: string } }
 ) {
   try {
+    const dbModels = await import('../../../../db/models.js');
     const { variableName } = params;
     await dbModels.deleteGeneralVariable(variableName);
     return NextResponse.json({ success: true });

@@ -110,11 +110,14 @@ export async function deleteInspector(id) {
 // ==================== INSPECTOR VARIABLES ====================
 
 export async function setInspectorVariable(inspectorId, variableName, value) {
-  const pool = await getDatabase();
-  await pool.query(
-    'INSERT INTO inspector_variables (inspector_id, variable_name, value) VALUES ($1, $2, $3) ON CONFLICT (inspector_id, variable_name) DO UPDATE SET value = $3',
-    [inspectorId, variableName, value]
-  );
+  return safeDbCall(async () => {
+    const pool = await getDatabase();
+    await pool.query(
+      'INSERT INTO inspector_variables (inspector_id, variable_name, value) VALUES ($1, $2, $3) ON CONFLICT (inspector_id, variable_name) DO UPDATE SET value = $3',
+      [inspectorId, variableName, value]
+    );
+    return true;
+  }, false);
 }
 
 export async function deleteInspectorVariable(inspectorId, variableName) {
@@ -157,9 +160,11 @@ export async function deleteInspectorVariableName(variableName) {
 // ==================== DOCUMENT TYPES ====================
 
 export async function getDocumentTypes(category) {
-  const pool = await getDatabase();
-  const result = await pool.query('SELECT type FROM document_types WHERE category = $1 ORDER BY type', [category]);
-  return result.rows.map(r => r.type);
+  return safeDbCall(async () => {
+    const pool = await getDatabase();
+    const result = await pool.query('SELECT type FROM document_types WHERE category = $1 ORDER BY type', [category]);
+    return result.rows.map(r => r.type);
+  }, []);
 }
 
 export async function documentTypeExists(type) {
@@ -200,11 +205,14 @@ export async function getAllGeneralVariables() {
 }
 
 export async function setGeneralVariable(variableName, value) {
-  const pool = await getDatabase();
-  await pool.query(
-    'INSERT INTO general_variables (variable_name, value) VALUES ($1, $2) ON CONFLICT (variable_name) DO UPDATE SET value = $2',
-    [variableName, value]
-  );
+  return safeDbCall(async () => {
+    const pool = await getDatabase();
+    await pool.query(
+      'INSERT INTO general_variables (variable_name, value) VALUES ($1, $2) ON CONFLICT (variable_name) DO UPDATE SET value = $2',
+      [variableName, value]
+    );
+    return true;
+  }, false);
 }
 
 export async function deleteGeneralVariable(variableName) {

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as dbModels from '../../../db/models.js';
 
 export async function GET() {
   try {
+    // Dynamic import to ensure it's only loaded on the server
+    const dbModels = await import('../../../db/models.js');
     const inspectors = await dbModels.getAllInspectors();
     return NextResponse.json(inspectors.map((i: any) => ({
       id: i.id,
@@ -17,6 +18,8 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    // Dynamic import to ensure it's only loaded on the server
+    const dbModels = await import('../../../db/models.js');
     const { id, name } = await request.json();
     if (!id || !name) {
       return NextResponse.json({ error: 'id and name are required' }, { status: 400 });

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as dbModels from '../../../../db/models.js';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { param: string } }
 ) {
   try {
+    // Dynamic import to ensure it's only loaded on the server
+    const dbModels = await import('../../../../db/models.js');
     const { param } = params;
     // Treat param as category for GET requests
     const types = await dbModels.getDocumentTypes(param);
@@ -25,6 +26,8 @@ export async function DELETE(
   { params }: { params: { param: string } }
 ) {
   try {
+    // Dynamic import to ensure it's only loaded on the server
+    const dbModels = await import('../../../../db/models.js');
     const { param } = params;
     // Treat param as type for DELETE requests
     await dbModels.deleteDocumentType(param);

@@ -12,6 +12,7 @@ dist
 dist-ssr
 .next
 *.local
+!.env.local.example
 
 # Environment variables
 .env
@@ -19,6 +20,13 @@ dist-ssr
 .env.development.local
 .env.test.local
 .env.production.local
+.env.local.example
+env.local
+*.env
+*.env.*
+!.env.example
+!ENV.example
+README.md
 
 # Editor directories and files
 .vscode/*

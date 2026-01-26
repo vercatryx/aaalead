@@ -2,8 +2,23 @@
 import pg from 'pg';
 const { Pool } = pg;
 
-const PROJECT_REF = 'hxsjkzatrfefeojvaitn';
-const PASSWORD = 'LeadClean^467';
+// Load environment variables (optional - Next.js handles this automatically)
+try {
+  const dotenv = (await import('dotenv')).default;
+  dotenv.config({ path: '.env.local' });
+} catch (e) {
+  // dotenv not installed, assume environment variables are set
+  console.log('Note: dotenv not found, using environment variables directly');
+}
+
+const PROJECT_REF = process.env.SUPABASE_PROJECT_REF;
+const PASSWORD = process.env.SUPABASE_DB_PASSWORD;
+
+if (!PROJECT_REF || !PASSWORD) {
+  console.error('❌ Error: SUPABASE_PROJECT_REF and SUPABASE_DB_PASSWORD environment variables are required');
+  console.error('   Please set them in your .env.local file');
+  process.exit(1);
+}
 
 const regions = ['us-east-1', 'us-west-1', 'us-west-2', 'eu-west-1', 'eu-central-1', 'ap-southeast-1', 'ap-northeast-1'];
 

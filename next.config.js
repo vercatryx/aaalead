@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Ensure database modules are treated as server-only
+  serverComponentsExternalPackages: ['pg', '@aws-sdk/client-s3'],
   // Enable static file serving for templates
   async rewrites() {
     return [];
