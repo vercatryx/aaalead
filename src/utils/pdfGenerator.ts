@@ -708,9 +708,7 @@ const flattenFormByManualDrawing = async (pdfDoc: PDFDocument, form: any): Promi
                                                 }
                                                 
                                                 // Calculate font size based on field height
-                                                // Use smaller font size for page 4 (index 3) to fit in placeholders
-                                                const fontSizeMultiplier = i === 3 ? 0.5 : 0.7;
-                                                const fontSize = Math.min(12, height * fontSizeMultiplier);
+                                                const fontSize = Math.min(12, height * 0.7);
                                                 
                                                 fieldsByPage.get(i)!.push({
                                                     field,
@@ -2350,6 +2348,7 @@ export const generatePDFReport = async (
         // After all forms are filled and Excel sheets are inserted, find where the original 7th page is
         // Original page 7 was at index 6, after Excel insertion it's at index 6 + numExcelPagesInserted
         // Move it to position 6 (which is right after pages 1-5, before Excel pages)
+        // IMPORTANT: Use copyPages to preserve the original page dimensions (especially for landscape pages)
         if (reportType === 'XHR' && numExcelPagesInserted > 0) {
             try {
                 const pages = pdfDoc.getPages();
@@ -2363,14 +2362,38 @@ export const generatePDFReport = async (
                 if (originalPage7Index < totalPages) {
                     console.log(`Moving original page 7 (currently at index ${originalPage7Index}) to position 6 (index 5, right after pages 1-5)`);
                     
-                    // Get the page at the original page 7 position
+                    // Get the page size BEFORE any operations to preserve dimensions
                     const pageToMove = pages[originalPage7Index];
+                    const pageSize = pageToMove.getSize();
+                    const isLandscape = pageSize.width > pageSize.height;
+                    console.log(`Page 7 original dimensions: ${pageSize.width}x${pageSize.height} (${isLandscape ? 'landscape' : 'portrait'})`);
                     
-                    // Remove it from its current position
+                    // Create a temporary PDF document to preserve the page with its exact dimensions
+                    const tempPdfBytes = await pdfDoc.save();
+                    const tempPdfDoc = await PDFDocument.load(tempPdfBytes);
+                    
+                    // Copy the page from temp document (this preserves all dimensions and content)
+                    const [copiedPage] = await pdfDoc.copyPages(tempPdfDoc, [originalPage7Index]);
+                    
+                    // Remove the original page from the main document
                     pdfDoc.removePage(originalPage7Index);
                     
-                    // Insert it at position 6 (index 5, right after pages 1-5, before Excel pages)
-                    pdfDoc.insertPage(5, pageToMove);
+                    // Insert the copied page at position 6 (index 5) - copyPages preserves dimensions
+                    pdfDoc.insertPage(5, copiedPage);
+                    
+                    // Verify the dimensions were preserved
+                    const insertedPage = pdfDoc.getPages()[5];
+                    const insertedSize = insertedPage.getSize();
+                    if (Math.abs(insertedSize.width - pageSize.width) > 0.1 || Math.abs(insertedSize.height - pageSize.height) > 0.1) {
+                        console.warn(`⚠️ Page dimensions changed during move! Original: ${pageSize.width}x${pageSize.height}, After: ${insertedSize.width}x${insertedSize.height}`);
+                    } else {
+                        console.log(`✅ Page dimensions preserved: ${insertedSize.width}x${insertedSize.height} (${isLandscape ? 'landscape' : 'portrait'})`);
+                    }
+                    
+                    // Rotate page 6 clockwise 90 degrees to correct orientation
+                    // pdf-lib setRotation accepts: 0, 90, 180, or 270 degrees
+                    insertedPage.setRotation(90);
+                    console.log(`✅ Rotated page 6 clockwise 90° to correct landscape orientation`);
                     
                     console.log(`✅ Successfully moved original page 7 to position 6. New total pages: ${pdfDoc.getPageCount()}`);
                 } else {
