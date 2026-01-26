@@ -708,7 +708,9 @@ const flattenFormByManualDrawing = async (pdfDoc: PDFDocument, form: any): Promi
                                                 }
                                                 
                                                 // Calculate font size based on field height
-                                                const fontSize = Math.min(12, height * 0.7);
+                                                // Use smaller font size for page 4 (index 3) to fit in placeholders
+                                                const fontSizeMultiplier = i === 3 ? 0.5 : 0.7;
+                                                const fontSize = Math.min(12, height * fontSizeMultiplier);
                                                 
                                                 fieldsByPage.get(i)!.push({
                                                     field,
@@ -2341,6 +2343,42 @@ export const generatePDFReport = async (
             } catch (err) {
                 console.warn('Error checking positive/negative or removing page:', err);
                 // Don't fail the whole generation if this check fails
+            }
+        }
+
+        // 8b. Move original page 7 to position 6 (for XHR reports)
+        // After all forms are filled and Excel sheets are inserted, find where the original 7th page is
+        // Original page 7 was at index 6, after Excel insertion it's at index 6 + numExcelPagesInserted
+        // Move it to position 6 (which is right after pages 1-5, before Excel pages)
+        if (reportType === 'XHR' && numExcelPagesInserted > 0) {
+            try {
+                const pages = pdfDoc.getPages();
+                const totalPages = pages.length;
+                
+                // Original page 7 was at index 6 in the template
+                // After Excel pages are inserted at index 5, the original page 7 is now at index 6 + numExcelPagesInserted
+                const originalPage7Index = 6 + numExcelPagesInserted;
+                
+                // Check if the original page 7 exists
+                if (originalPage7Index < totalPages) {
+                    console.log(`Moving original page 7 (currently at index ${originalPage7Index}) to position 6 (index 5, right after pages 1-5)`);
+                    
+                    // Get the page at the original page 7 position
+                    const pageToMove = pages[originalPage7Index];
+                    
+                    // Remove it from its current position
+                    pdfDoc.removePage(originalPage7Index);
+                    
+                    // Insert it at position 6 (index 5, right after pages 1-5, before Excel pages)
+                    pdfDoc.insertPage(5, pageToMove);
+                    
+                    console.log(`✅ Successfully moved original page 7 to position 6. New total pages: ${pdfDoc.getPageCount()}`);
+                } else {
+                    console.warn(`Original page 7 index ${originalPage7Index} is out of range. Total pages: ${totalPages}`);
+                }
+            } catch (err) {
+                console.warn('Error moving original page 7 to position 6:', err);
+                // Don't fail the whole generation if this fails
             }
         }
 
