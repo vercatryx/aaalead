@@ -13,6 +13,17 @@ const r2Client = new S3Client({
 
 const R2_BUCKET_NAME = process.env.NEXT_PUBLIC_R2_BUCKET_NAME || process.env.REACT_APP_R2_BUCKET_NAME || 'lead-main';
 
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  });
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { key: string[] } }
@@ -43,6 +54,10 @@ export async function GET(
       headers: {
         'Content-Type': contentType,
         'Content-Length': buffer.length.toString(),
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Cache-Control': 'public, max-age=31536000, immutable',
       },
     });
   } catch (error: any) {

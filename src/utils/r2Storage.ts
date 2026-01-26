@@ -171,54 +171,29 @@ export const uploadFileToR2 = async (file: File | Blob, key: string): Promise<st
 };
 
 /**
- * Get a file from R2 storage directly from Cloudflare R2 endpoint
+ * Get a file from R2 storage via API proxy (avoids CORS issues)
  * @param key The R2 key/path of the file
  * @returns The file as a Blob
  */
 export const getFileFromR2 = async (key: string): Promise<Blob> => {
   try {
-    // Use direct R2 endpoint URL
-    // Format: https://{account-id}.r2.cloudflarestorage.com/{bucket}/{key}
-    const bucket = R2_BUCKET_NAME;
-    const r2Url = `${R2_ENDPOINT}/${bucket}/${key}`;
+    // Use API proxy endpoint to avoid CORS issues
+    // The API route at /api/files/[...key] will fetch from R2 server-side
+    const apiUrl = `/api/files/${encodeURIComponent(key)}`;
     
-    // Also try public domain if available
-    const publicUrl = R2_PUBLIC_DOMAIN ? `${R2_PUBLIC_DOMAIN}/${key}` : null;
-    
-    console.log('📥 Fetching file from R2:', {
+    console.log('📥 Fetching file from R2 via API:', {
       key,
-      r2Url,
-      publicUrl: publicUrl || 'N/A',
-      bucket
+      apiUrl
     });
     
-    // Try public domain first (usually faster), fallback to direct endpoint
-    let response: Response | null = null;
-    let usedUrl = '';
-    
-    if (publicUrl) {
-      try {
-        response = await fetch(publicUrl);
-        usedUrl = publicUrl;
-        if (response.ok) {
-          console.log(`✅ Fetched from public domain: ${publicUrl}`);
-        } else {
-          console.warn(`⚠️ Public domain returned ${response.status}, trying direct endpoint...`);
-          response = null;
-        }
-      } catch (err) {
-        console.warn(`⚠️ Failed to fetch from public domain, trying direct endpoint:`, err);
-      }
-    }
-    
-    // Fallback to direct endpoint
-    if (!response || !response.ok) {
-      response = await fetch(r2Url);
-      usedUrl = r2Url;
-    }
+    const response = await fetch(apiUrl);
     
     if (!response.ok) {
-      throw new Error(`Failed to fetch file: HTTP ${response.status} ${response.statusText}`);
+      if (response.status === 404) {
+        throw new Error(`File not found: ${key}`);
+      }
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`Failed to fetch file: HTTP ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
     }
 
     const blob = await response.blob();
@@ -226,7 +201,6 @@ export const getFileFromR2 = async (key: string): Promise<Blob> => {
     
     console.log('📦 File fetched successfully:', {
       key,
-      url: usedUrl,
       size: fileSize,
       sizeFormatted: `${(fileSize / 1024).toFixed(2)} KB`,
       type: blob.type || 'unknown'
@@ -247,8 +221,7 @@ export const getFileFromR2 = async (key: string): Promise<Blob> => {
     console.error('❌ Error getting file from R2:', {
       key,
       error: error.message || error,
-      r2Url: `${R2_ENDPOINT}/${R2_BUCKET_NAME}/${key}`,
-      publicUrl: R2_PUBLIC_DOMAIN ? `${R2_PUBLIC_DOMAIN}/${key}` : 'N/A'
+      apiUrl: `/api/files/${encodeURIComponent(key)}`
     });
     throw new Error(`Failed to get file from R2: ${error.message || error}`);
   }
