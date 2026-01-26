@@ -18,9 +18,17 @@ export function getConnectionConfig() {
   const PROJECT_REF = process.env.SUPABASE_PROJECT_REF;
   const PASSWORD = process.env.SUPABASE_DB_PASSWORD;
   
-  // Default to direct connection (faster and more reliable)
-  // Set SUPABASE_USE_POOLER=true to use pooler instead
-  const useDirectConnection = process.env.SUPABASE_USE_POOLER !== 'true' && process.env.SUPABASE_USE_POOLER !== '1';
+  // Auto-detect Vercel environment (Vercel doesn't support IPv6, so we must use pooler)
+  const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
+  
+  // Default to direct connection (faster and more reliable) for local development
+  // Use pooler for Vercel (IPv4 compatible) or if explicitly set
+  // Set SUPABASE_USE_POOLER=true to force pooler, SUPABASE_USE_POOLER=false to force direct
+  const forcePooler = process.env.SUPABASE_USE_POOLER === 'true' || process.env.SUPABASE_USE_POOLER === '1';
+  const forceDirect = process.env.SUPABASE_USE_POOLER === 'false' || process.env.SUPABASE_USE_POOLER === '0';
+  
+  // Use pooler if on Vercel OR if explicitly forced, otherwise use direct connection
+  const useDirectConnection = !isVercel && !forcePooler;
   
   // If DATABASE_URL is provided, use it directly
   if (process.env.DATABASE_URL) {
@@ -74,8 +82,11 @@ export function getConnectionConfig() {
   }
   
   // Log which connection string is being used (for debugging)
+  if (isVercel) {
+    console.log('🌐 Vercel environment detected - using pooler connection (IPv4 compatible)');
+  }
   console.log(`🔧 Using ${connectionType}`);
-  console.log(`🔧 Connection: ${useDirectConnection ? 'Direct (faster)' : 'Pooler (IPv4 compatible)'}`);
+  console.log(`🔧 Connection: ${useDirectConnection ? 'Direct (faster, IPv6)' : 'Pooler (IPv4 compatible)'}`);
   
   return {
     connectionString: connectionString,
@@ -112,7 +123,12 @@ async function initializeDatabaseModule() {
     if (config.connectionString.includes('db.') && config.connectionString.includes('.supabase.co')) {
       console.log('✅ Using direct connection (faster, IPv6)');
     } else if (config.connectionString.includes('pooler.supabase.com')) {
-      console.log('✅ Using pooler connection (IPv4 compatible)');
+      const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
+      if (isVercel) {
+        console.log('✅ Using pooler connection (IPv4 compatible) - Vercel detected');
+      } else {
+        console.log('✅ Using pooler connection (IPv4 compatible)');
+      }
     }
     
     pool = new Pool(config);
