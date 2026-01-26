@@ -21,10 +21,11 @@ The hostname `db.hxsjkzatrfefeojvaitn.supabase.co` cannot be resolved by Node.js
      - **Connection pooling** - Session mode
 
 4. **Copy the Connection String**
-   - For Next.js API routes, use the **Connection pooling → Transaction mode** connection string
+   - For Next.js API routes using `pg`, use the **Connection pooling → Session mode** connection string (Port 5432)
+   - **Do NOT use Transaction mode (Port 6543)** as it doesn't support prepared statements used by `pg`
    - It should look like:
      ```
-     postgresql://postgres.xxx:[YOUR-PASSWORD]@aws-0-us-east-1.pooler.supabase.com:6543/postgres?pgbouncer=true
+     postgresql://postgres.xxx:[YOUR-PASSWORD]@aws-0-us-east-1.pooler.supabase.com:5432/postgres
      ```
    - OR use the direct URI:
      ```

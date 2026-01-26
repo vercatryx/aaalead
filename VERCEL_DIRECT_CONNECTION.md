@@ -12,6 +12,7 @@ The database connection module now supports attempting direct connection (IPv6) 
 
 2. **Vercel Deployment (Default)**:
    - Uses pooler connection (IPv4) by default - required for Vercel
+   - Uses **Session Mode (Port 5432)** by default (compatible with prepared statements)
    - Can attempt direct connection if `SUPABASE_USE_DIRECT=true` is set
    - Automatically falls back to pooler if direct connection fails
 
@@ -30,13 +31,20 @@ The system will:
 3. Log the attempt and fallback for debugging
 
 ### To Force Pooler (Skip Direct Attempt)
-
-Set in your Vercel environment variables:
-```
-SUPABASE_USE_POOLER=true
-```
-
-This will skip the direct connection attempt and go straight to pooler.
+ 
+ Set in your Vercel environment variables:
+ ```
+ SUPABASE_USE_POOLER=true
+ ```
+ 
+ This will skip the direct connection attempt and go straight to pooler (Session Mode by default).
+ 
+ ### To Use Transaction Mode (Not Recommended for 'pg')
+ 
+ If you are using a client that doesn't use prepared statements, you can force Transaction Mode:
+ ```
+ SUPABASE_USE_TRANSACTION_MODE=true
+ ```
 
 ## Important Notes
 
