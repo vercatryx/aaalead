@@ -2382,6 +2382,28 @@ export const generatePDFReport = async (
             }
         }
 
+        // 8.5. Flatten XHR reports (after all operations are complete to avoid reference errors)
+        if (reportType === 'XHR') {
+            console.log('🔄 Flattening XHR report after all operations are complete...');
+            try {
+                await flattenFormAsImage(pdfDoc);
+                console.log('✅ XHR report flattened successfully');
+            } catch (err: any) {
+                // If flattening fails, log the error but don't throw
+                // This allows the PDF to still be generated (just editable)
+                console.warn('⚠️ Failed to flatten XHR PDF:', err.message);
+                if (err.message && err.message.includes('Could not find page')) {
+                    console.warn('   ERROR: Form fields reference a page that no longer exists!');
+                    console.warn('   This can happen when:');
+                    console.warn('   - Pages are removed before flattening');
+                    console.warn('   - Form fields reference pages from the original template that were modified');
+                    console.warn('   - Internal pdf-lib page reference issues');
+                    console.warn('   The PDF will be generated but will remain editable.');
+                }
+                // Don't throw - allow PDF to be generated even if not flattened
+            }
+        }
+
         // 9. Save and Download
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
