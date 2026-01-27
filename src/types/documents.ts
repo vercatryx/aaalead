@@ -9,7 +9,8 @@ export interface Inspector {
 export interface Document {
   id: string;
   fileName: string;
-  file: File | Blob;
+  file?: File | Blob; // Optional for stored documents that have filePath instead
+  filePath?: string; // Optional for stored documents
   uploadedAt: Date;
   category: 'general' | 'general-typed' | 'inspector';
   inspectorId?: string; // For inspector-specific documents

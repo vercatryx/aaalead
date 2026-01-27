@@ -1689,8 +1689,13 @@ export const generatePDFReport = async (
                     doc.documentType?.toLowerCase().includes('signature')
                 );
 
-                if (signatureDoc?.file) {
+                const signatureFile = signatureDoc?.file;
+                if (signatureDoc && signatureFile) {
                     try {
+                        // TypeScript narrowing: we've checked signatureFile exists above
+                        // Use type assertion since we've verified it exists in the if condition
+                        const file = signatureFile as File | Blob;
+                        
                         // Known position of signature (from when we removed the field)
                         // Move 20px higher: original y=86.56, now y=106.56
                         const sigX = 594.72;
@@ -1703,12 +1708,12 @@ export const generatePDFReport = async (
                         const targetPage = pages[0]; // Signature is on first page
 
                         // Embed the signature image
-                        const arrayBuffer = await signatureDoc!.file.arrayBuffer();
+                        const arrayBuffer = await file.arrayBuffer();
                         let image;
                         
-                        if (signatureDoc!.file.type === 'image/png') {
+                        if (file.type === 'image/png') {
                             image = await pdfDoc.embedPng(arrayBuffer);
-                        } else if (signatureDoc!.file.type === 'image/jpeg' || signatureDoc!.file.type === 'image/jpg') {
+                        } else if (file.type === 'image/jpeg' || file.type === 'image/jpg') {
                             image = await pdfDoc.embedJpg(arrayBuffer);
                         } else {
                             // Try PNG first, then JPEG
@@ -2297,19 +2302,21 @@ export const generatePDFReport = async (
                     doc.documentType?.toLowerCase().includes('signature')
                 );
 
-                if (signatureDoc?.file) {
+                const signatureFile2 = signatureDoc?.file;
+                if (signatureDoc && signatureFile2) {
                     try {
+                        const file2 = signatureFile2 as File | Blob;
                         const sigX = 594.72;
                         const sigY = 106.56;
                         const sigWidth = 83.4;
                         const sigHeight = 50;
 
-                        const arrayBuffer = await signatureDoc!.file.arrayBuffer();
+                        const arrayBuffer = await file2.arrayBuffer();
                         let image;
                         
-                        if (signatureDoc!.file.type === 'image/png') {
+                        if (file2.type === 'image/png') {
                             image = await pdfDoc.embedPng(arrayBuffer);
-                        } else if (signatureDoc!.file.type === 'image/jpeg' || signatureDoc!.file.type === 'image/jpg') {
+                        } else if (file2.type === 'image/jpeg' || file2.type === 'image/jpg') {
                             image = await pdfDoc.embedJpg(arrayBuffer);
                         } else {
                             try {

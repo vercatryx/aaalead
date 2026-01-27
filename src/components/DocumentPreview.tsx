@@ -49,11 +49,12 @@ export const DocumentPreview: React.FC<DocumentPreviewProps> = ({ document, clas
         });
 
         // Check if document has a valid file (not empty blob)
-        const hasValidFile = document.file && document.file.size > 0;
+        const file = document.file;
+        const hasValidFile = file && file.size > 0;
 
         // If document has a valid file property (File or Blob), use it directly
-        if (hasValidFile) {
-          objectUrl = URL.createObjectURL(document.file);
+        if (hasValidFile && file) {
+          objectUrl = URL.createObjectURL(file);
           urlRef.current = objectUrl;
           if (isMounted) {
             setPreviewUrl(objectUrl);

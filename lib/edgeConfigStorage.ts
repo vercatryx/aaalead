@@ -12,6 +12,7 @@
  */
 
 import { getEdgeConfigValue, EdgeConfigKeys, isEdgeConfigAvailable, setEdgeConfigValue, setEdgeConfigValues } from './edgeConfig';
+import type { Document } from '../src/types/documents';
 
 // ==================== INSPECTORS ====================
 
@@ -266,7 +267,7 @@ export async function getInspectorDocuments() {
   }
 }
 
-export async function getDocumentById(id: string) {
+export async function getDocumentById(id: string): Promise<Document | null> {
   if (!(await isEdgeConfigAvailable())) {
     return null;
   }
@@ -283,7 +284,7 @@ export async function getDocumentById(id: string) {
       documentType: doc.document_type,
       inspectorId: doc.inspector_id,
       filePath: doc.file_path
-    };
+    } as Document;
   } catch (error) {
     console.error(`Error getting document ${id} from Edge Config:`, error);
     return null;
@@ -300,9 +301,9 @@ export async function createDocument(id: string, fileName: string, filePath: str
     const document: Document = {
       id,
       fileName,
-      filePath,
+      filePath, // Stored documents use filePath instead of file
       uploadedAt: new Date(),
-      category,
+      category: category as 'general' | 'general-typed' | 'inspector',
       documentType: documentType || undefined,
       inspectorId: inspectorId || undefined
     };

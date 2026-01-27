@@ -21,6 +21,7 @@ async function getEdgeConfigModule() {
   }
   
   try {
+    // @ts-expect-error - @vercel/edge-config is optional and may not be installed
     edgeConfigModule = await import('@vercel/edge-config');
     return edgeConfigModule;
   } catch (error) {
