@@ -23,8 +23,26 @@ const formatDate = (dateStr: string | number | Date): string => {
     } else if (typeof dateStr === 'number') {
         // Excel serial date
         dateObj = new Date((dateStr - (25567 + 2)) * 86400 * 1000);
+    } else if (typeof dateStr === 'string') {
+        // For strings with date and time like "1/13/2026  10:39:16 AM"
+        // First, try to extract just the date part before any time indicators
+        let dateOnlyStr = dateStr.trim();
+        
+        // Remove time portion - look for patterns like " 10:39:16 AM" or " 10:39 AM"
+        // Match space followed by time pattern (digits:digits:digits or digits:digits followed by AM/PM)
+        const timePattern = /\s+\d{1,2}:\d{2}(:\d{2})?\s*(AM|PM|am|pm)?/i;
+        if (timePattern.test(dateOnlyStr)) {
+            dateOnlyStr = dateOnlyStr.replace(timePattern, '').trim();
+        }
+        
+        // Try parsing the date-only string
+        dateObj = new Date(dateOnlyStr);
+        
+        // If that fails, try parsing the original string
+        if (isNaN(dateObj.getTime())) {
+            dateObj = new Date(dateStr);
+        }
     } else {
-        // String parsing
         dateObj = new Date(dateStr);
     }
 
@@ -32,12 +50,21 @@ const formatDate = (dateStr: string | number | Date): string => {
         return dateObj.toISOString().split('T')[0];
     }
 
-    // Fallback for generic string stripping time
-    if (typeof dateStr === 'string' && dateStr.includes(' ')) {
-        return dateStr.split(' ')[0];
+    // Final fallback: if it's a string, try to extract just the date part
+    if (typeof dateStr === 'string') {
+        // Split by space and take first part (should be the date)
+        const parts = dateStr.trim().split(/\s+/);
+        if (parts.length > 0) {
+            const firstPart = parts[0];
+            // Try to parse just the first part
+            const fallbackDate = new Date(firstPart);
+            if (!isNaN(fallbackDate.getTime())) {
+                return fallbackDate.toISOString().split('T')[0];
+            }
+        }
     }
 
-    return String(dateStr);
+    return '';
 };
 
 export const extractSheetInfo = (sheet: XLSX.WorkSheet): ExtractedSheetInfo => {

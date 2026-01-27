@@ -583,6 +583,94 @@ const createExcelDataPages = async (pdfDoc: PDFDocument, excelData: any[][], hea
     return pages;
 };
 
+// Helper function to fix text overflow in fields before flattening
+// This ensures that long text is visible after flattening by reducing font size to fit within boundaries
+const fixFieldTextOverflow = async (form: any, font: any): Promise<void> => {
+    console.log('🔧 Fixing text overflow in fields before flattening...');
+    
+    try {
+        const fields = form.getFields();
+        let fixedCount = 0;
+        
+        for (const field of fields) {
+            try {
+                // Only process text fields
+                if (field.constructor.name !== 'PDFTextField') {
+                    continue;
+                }
+                
+                const fieldName = field.getName();
+                const text = field.getText() || '';
+                
+                if (!text || text.trim().length === 0) {
+                    continue; // Skip empty fields
+                }
+                
+                // Try to get field dimensions from widget annotations
+                let fieldWidth = 0;
+                let fieldHeight = 0;
+                
+                try {
+                    const acroField = (field as any).acroField;
+                    if (acroField) {
+                        const kids = acroField.dict?.get('Kids');
+                        if (kids && Array.isArray(kids) && kids.length > 0) {
+                            const widget = kids[0];
+                            const rect = widget.dict?.get('Rect');
+                            if (rect && Array.isArray(rect) && rect.length >= 4) {
+                                // Rect format: [x1, y1, x2, y2]
+                                fieldWidth = Math.abs(rect[2] - rect[0]);
+                                fieldHeight = Math.abs(rect[3] - rect[1]);
+                            }
+                        }
+                    }
+                } catch (dimErr) {
+                    // If we can't get dimensions, continue with default handling
+                }
+                
+                // If we have dimensions, check if text fits
+                if (fieldWidth > 0 && fieldHeight > 0) {
+                    // Estimate text width (approximate: 0.6 * fontSize per character for Helvetica)
+                    // Use a conservative estimate with default font size of 12
+                    const estimatedCharWidth = 7.2; // 0.6 * 12
+                    const estimatedTextWidth = text.length * estimatedCharWidth;
+                    
+                    // If text is wider than field, reduce font size to fit
+                    if (estimatedTextWidth > fieldWidth) {
+                        // Calculate appropriate font size to fit text
+                        // Leave some padding (10% on each side)
+                        const availableWidth = fieldWidth * 0.8;
+                        const calculatedFontSize = Math.max(6, Math.min(12, (availableWidth / text.length) / 0.6));
+                        
+                        try {
+                            if (typeof (field as any).setFontSize === 'function') {
+                                (field as any).setFontSize(calculatedFontSize);
+                                fixedCount++;
+                                console.log(`   ✓ Fixed field "${fieldName}": reduced font size to ${calculatedFontSize.toFixed(1)}`);
+                            }
+                        } catch (fontSizeErr) {
+                            // If setFontSize fails, skip this field
+                            console.warn(`   ⚠️ Could not set font size for field "${fieldName}"`);
+                        }
+                    }
+                }
+            } catch (fieldErr) {
+                // Continue processing other fields if one fails
+                console.warn(`   ⚠️ Could not fix field "${field.getName()}":`, fieldErr);
+            }
+        }
+        
+        if (fixedCount > 0) {
+            console.log(`✅ Fixed text overflow in ${fixedCount} field(s) by reducing font size`);
+        } else {
+            console.log('✅ No text overflow issues found');
+        }
+    } catch (err: any) {
+        console.warn('⚠️ Error fixing text overflow:', err.message);
+        // Don't throw - continue with flattening even if overflow fix fails
+    }
+};
+
 // Method 4: Manual text drawing - Extract field positions and draw text directly
 // Flattening: Use pdf-lib's built-in flatten() method (like print to PDF)
 // This makes the PDF non-editable by converting all form fields to static content
@@ -650,6 +738,11 @@ const flattenFormByRemovingFields = async (pdfDoc: PDFDocument, form: any): Prom
             console.warn(`   Valid fields: ${validFields.length}`);
             console.warn('   Attempting to flatten - pdf-lib may handle this gracefully or fail completely.');
         }
+        
+        // Fix text overflow issues before updating appearances
+        // This ensures long text is visible after flattening
+        const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        await fixFieldTextOverflow(form, font);
         
         // Update all field appearances first to ensure values are rendered
         // This helps ensure the flattened content looks correct
@@ -1824,17 +1917,26 @@ export const generatePDFReport = async (
             }
         }
 
-        // 5. Add Excel data pages before page 6 (for XHR reports)
+        // 5. Add Excel data pages (for XHR reports)
         // Store number of Excel pages inserted so we can adjust page 6 index later
         let numExcelPagesInserted = 0;
         if (data.fullExcelData && data.fullExcelData.length > 0) {
             const totalPages = pdfDoc.getPageCount();
-            // For XHR reports, insert before page 6 (index 5)
+            // For XHR reports:
+            // - Positive reports: insert after page 6 (index 6)
+            // - Negative reports: insert before page 6 (index 5)
             // For other reports, insert before the last page
             let insertBeforeIndex: number;
             if (reportType === 'XHR') {
-                // Insert at index 5 (before page 6)
-                insertBeforeIndex = 5;
+                // Check if report is positive
+                const isPositive = data.isPositive ?? false;
+                if (isPositive) {
+                    // Insert at index 6 (after page 6) for positive reports
+                    insertBeforeIndex = 6;
+                } else {
+                    // Insert at index 5 (before page 6) for negative reports
+                    insertBeforeIndex = 5;
+                }
             } else {
                 // Insert before last page (original behavior)
                 insertBeforeIndex = Math.max(0, totalPages - 1);
@@ -1886,11 +1988,12 @@ export const generatePDFReport = async (
                 if (signatureDoc?.file) {
                     try {
                         // Get page 6 - this is the page with the phone field
-                        // After Excel pages are inserted before page 6, the page 6 index shifts
                         const pages = pdfDoc.getPages();
-                        // Original page 6 was at index 5, but Excel pages were inserted at index 5,
-                        // so page 6 is now at index 5 + numExcelPagesInserted
-                        const targetPageIndex = 5 + numExcelPagesInserted; // Page 6 (0-indexed, adjusted for Excel pages)
+                        // Calculate page 6 index based on where Excel pages were inserted:
+                        // - Negative reports: Excel at index 5, so page 6 is at index 5 + numExcelPagesInserted
+                        // - Positive reports: Excel at index 6 (after page 6), so page 6 stays at index 5
+                        const isPositive = data.isPositive ?? false;
+                        const targetPageIndex = isPositive ? 5 : (5 + numExcelPagesInserted); // Page 6 (0-indexed, adjusted for Excel pages)
                         
                         if (pages.length > targetPageIndex) {
                             const targetPage = pages[targetPageIndex];
@@ -2401,10 +2504,9 @@ export const generatePDFReport = async (
                 );
                 
                 if (isPositive) {
-                    // After Excel pages are inserted before page 6, the page 6 index has shifted
-                    // Original page 6 was at index 5, but Excel pages were inserted at index 5,
-                    // so page 6 is now at index 5 + numExcelPagesInserted
-                    const adjustedTargetPageIndex = targetPageIndex + numExcelPagesInserted;
+                    // For positive reports: Excel pages are inserted at index 6 (after page 6),
+                    // so page 6 stays at index 5 (targetPageIndex)
+                    const adjustedTargetPageIndex = targetPageIndex;
                     const totalPages = pdfDoc.getPageCount();
                     
                     // Make sure the target page index is still valid
@@ -2425,18 +2527,18 @@ export const generatePDFReport = async (
             }
         }
 
-        // 8b. Move original page 7 to position 6 (for XHR reports)
-        // After all forms are filled and Excel sheets are inserted, find where the original 7th page is
-        // Original page 7 was at index 6, after Excel insertion it's at index 6 + numExcelPagesInserted
-        // Move it to position 6 (which is right after pages 1-5, before Excel pages)
+        // 8b. Move original page 7 to position 6 (for XHR negative reports only)
+        // For negative reports: Excel pages are inserted at index 5, so page 7 needs to be moved to position 6 (index 5)
+        // For positive reports: Excel pages are inserted at index 6 (after page 6), so page 7 stays in place
         // IMPORTANT: Use copyPages to preserve the original page dimensions (especially for landscape pages)
-        if (reportType === 'XHR' && numExcelPagesInserted > 0) {
+        const isPositive = data.isPositive ?? false;
+        if (reportType === 'XHR' && numExcelPagesInserted > 0 && !isPositive) {
             try {
                 const pages = pdfDoc.getPages();
                 const totalPages = pages.length;
                 
                 // Original page 7 was at index 6 in the template
-                // After Excel pages are inserted at index 5, the original page 7 is now at index 6 + numExcelPagesInserted
+                // After Excel pages are inserted at index 5 (for negative reports), the original page 7 is now at index 6 + numExcelPagesInserted
                 const originalPage7Index = 6 + numExcelPagesInserted;
                 
                 // Check if the original page 7 exists
