@@ -291,7 +291,7 @@ export async function getDocumentById(id: string) {
   }
 }
 
-export async function createDocument(id: string, fileName: string, filePath: string, category: string, documentType?: string | null, inspectorId?: string | null): Promise<Omit<Document, 'file'> & { filePath: string } | null> {
+export async function createDocument(id: string, fileName: string, filePath: string, category: 'general' | 'general-typed' | 'inspector', documentType?: string | null, inspectorId?: string | null): Promise<Omit<Document, 'file'> & { filePath: string } | null> {
   if (!(await isEdgeConfigAvailable())) {
     return null;
   }
