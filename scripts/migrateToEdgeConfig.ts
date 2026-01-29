@@ -22,9 +22,9 @@ interface EdgeConfigItem {
   value: any;
 }
 
-async function migrate() {
+function migrate() {
   try {
-    const data = await dbModels.getAllData();
+    const data = dbModels.getAllData();
     const items: EdgeConfigItem[] = [];
 
     // 1. Inspectors
@@ -159,7 +159,4 @@ async function migrate() {
   }
 }
 
-migrate().catch((error) => {
-  console.error('Migration failed:', error);
-  process.exit(1);
-});
+migrate();

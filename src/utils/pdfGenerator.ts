@@ -1294,6 +1294,9 @@ export const generatePDFReport = async (
         const checkboxMapping = config.mappings.find(m => m.pdfFieldId === 'Check Box8');
         const otherMappings = config.mappings.filter(m => m.pdfFieldId !== 'Check Box8');
         
+        // Embed font for red "P" text (used for Numb1 and Numb2)
+        const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        
         otherMappings.forEach(mapping => {
             try {
                 // Skip fields that were already handled in special cases
@@ -1591,6 +1594,9 @@ export const generatePDFReport = async (
                         console.warn(`Could not set font size for field ${mapping.pdfFieldId}:`, fontSizeErr.message);
                     }
                 }
+                
+                // Note: Red numbers for Numb1 and Numb2 are drawn later (after all fields are filled)
+                // This ensures they appear on top of the original field values
                 
                 // Store phone field reference for later use in signature positioning
                 if (reportType === 'XHR' && (mapping.pdfFieldId === 'Phone' || mapping.pdfFieldId === 'phone')) {
@@ -2647,7 +2653,63 @@ export const generatePDFReport = async (
         // Note: Page 6 rotation is handled during flattening by preserving correct dimensions
         // No additional rotation needed - dimensions are preserved correctly
 
-        // 9. Save and Download
+        // 9. Draw red numbers for Numb1 and Numb2 fields on page 4 AFTER all processing (including flattening)
+        // This ensures the red numbers are not removed by the flattening process
+        if (reportType === 'XHR') {
+            try {
+                const pages = pdfDoc.getPages();
+                // Page 4 is at index 3 (0-indexed) - Excel pages are inserted at index 5, so page 4 should still be at index 3
+                // But let's be safe and check if we have enough pages
+                const page4Index = 3;
+                if (pages.length > page4Index) {
+                    const page4 = pages[page4Index];
+                    
+                    // Get the actual values from the data
+                    const numb1Value = String(data['Numb1'] || data.totalReadings || '0');
+                    const numb2Value = String(data['Numb2'] || data.positiveReadings || '0');
+                    
+                    console.log(`🔍 Drawing red numbers on page 4 (index ${page4Index}) AFTER flattening: Numb1="${numb1Value}", Numb2="${numb2Value}"`);
+                    
+                    // Known coordinates from field inspection:
+                    // Numb1: X: 188.475, Y: 364.472, Width: 21.465, Height: 13.319
+                    // Numb2: X: 206.445, Y: 348.513, Width: 20.938, Height: 13.319
+                    
+                    // Draw Numb1 value with small offset: slightly to the right and slightly lower
+                    // Y coordinate is from bottom, so moving "down" means subtracting from Y
+                    const numb1X = 188.475 + 2.5; // Offset to the right (2.5 points)
+                    const numb1Y = 364.472 + 13.319 - 12; // y + height - 12 points (moved down more)
+                    
+                    page4.drawText(numb1Value, {
+                        x: numb1X,
+                        y: numb1Y,
+                        size: 10,
+                        font: boldFont,
+                        color: rgb(1, 0, 0), // Red color
+                    });
+                    
+                    // Draw Numb2 value with small offset: slightly to the right and slightly lower
+                    const numb2X = 206.445 + 2.5; // Offset to the right (2.5 points)
+                    const numb2Y = 348.513 + 13.319 - 12; // y + height - 12 points (moved down more)
+                    
+                    page4.drawText(numb2Value, {
+                        x: numb2X,
+                        y: numb2Y,
+                        size: 10,
+                        font: boldFont,
+                        color: rgb(1, 0, 0), // Red color
+                    });
+                    
+                    console.log(`✅ Drew red "${numb1Value}" for Numb1 on page 4 (index ${page4Index}) at (${numb1X}, ${numb1Y}) AFTER flattening`);
+                    console.log(`✅ Drew red "${numb2Value}" for Numb2 on page 4 (index ${page4Index}) at (${numb2X}, ${numb2Y}) AFTER flattening`);
+                } else {
+                    console.warn(`⚠️ Page 4 (index ${page4Index}) not found. Total pages: ${pages.length}`);
+                }
+            } catch (pErr: any) {
+                console.error('❌ Error drawing red numbers on page 4 AFTER flattening:', pErr.message, pErr.stack);
+            }
+        }
+
+        // 10. Save and Download
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
         const link = document.createElement('a');

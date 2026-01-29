@@ -11,8 +11,8 @@
  * for read-write operations.
  */
 
-import { getEdgeConfigValue, EdgeConfigKeys, isEdgeConfigAvailable, setEdgeConfigValue, setEdgeConfigValues } from './edgeConfig';
 import type { Document } from '../src/types/documents';
+import { getEdgeConfigValue, EdgeConfigKeys, isEdgeConfigAvailable, setEdgeConfigValue, setEdgeConfigValues } from './edgeConfig';
 
 // ==================== INSPECTORS ====================
 
@@ -267,7 +267,7 @@ export async function getInspectorDocuments() {
   }
 }
 
-export async function getDocumentById(id: string): Promise<Document | null> {
+export async function getDocumentById(id: string) {
   if (!(await isEdgeConfigAvailable())) {
     return null;
   }
@@ -284,26 +284,26 @@ export async function getDocumentById(id: string): Promise<Document | null> {
       documentType: doc.document_type,
       inspectorId: doc.inspector_id,
       filePath: doc.file_path
-    } as Document;
+    };
   } catch (error) {
     console.error(`Error getting document ${id} from Edge Config:`, error);
     return null;
   }
 }
 
-export async function createDocument(id: string, fileName: string, filePath: string, category: string, documentType?: string | null, inspectorId?: string | null): Promise<Document | null> {
+export async function createDocument(id: string, fileName: string, filePath: string, category: string, documentType?: string | null, inspectorId?: string | null): Promise<Omit<Document, 'file'> & { filePath: string } | null> {
   if (!(await isEdgeConfigAvailable())) {
     return null;
   }
   
   try {
-    // Create document object
-    const document: Document = {
+    // Create document object (without file property since Edge Config only stores metadata)
+    const document: Omit<Document, 'file'> & { filePath: string } = {
       id,
       fileName,
-      filePath, // Stored documents use filePath instead of file
+      filePath,
       uploadedAt: new Date(),
-      category: category as 'general' | 'general-typed' | 'inspector',
+      category,
       documentType: documentType || undefined,
       inspectorId: inspectorId || undefined
     };

@@ -21,11 +21,12 @@ async function getEdgeConfigModule() {
   }
   
   try {
-    // @ts-expect-error - @vercel/edge-config is optional and may not be installed
+    // Edge Config is not used - suppress TypeScript error since package is not installed
+    // @ts-expect-error - @vercel/edge-config is not installed and not used
     edgeConfigModule = await import('@vercel/edge-config');
     return edgeConfigModule;
   } catch (error) {
-    console.warn('@vercel/edge-config not available:', error);
+    // Edge Config is not available/used - this is expected
     edgeConfigModule = false;
     return null;
   }
