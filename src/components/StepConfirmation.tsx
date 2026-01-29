@@ -49,9 +49,9 @@ export const StepConfirmation: React.FC<StepConfirmationProps> = ({
             initialFormData['address'] = data.address;
         }
         
-        // Date from Excel - use the date extracted and passed from StepUpload
+        // Date from Excel - use extracted date if available
         if (initialFormData['Date'] === undefined || initialFormData['Date'] === '') {
-            initialFormData['Date'] = data['Date'] || '';
+            initialFormData['Date'] = data['Date'] || data.date || '';
         }
         
         // Today/Report Date - default to today if not set

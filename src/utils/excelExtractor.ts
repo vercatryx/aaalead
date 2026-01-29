@@ -12,7 +12,7 @@ export interface ExtractedSheetInfo {
     fullExcelData?: any[][]; // Full Excel data including header row
 }
 
-// Helper to format date YYYY-MM-DD
+// Helper to format date YYYY-MM-DD (strips time component)
 const formatDate = (dateStr: string | number | Date): string => {
     if (!dateStr) return '';
 
@@ -23,48 +23,35 @@ const formatDate = (dateStr: string | number | Date): string => {
     } else if (typeof dateStr === 'number') {
         // Excel serial date
         dateObj = new Date((dateStr - (25567 + 2)) * 86400 * 1000);
-    } else if (typeof dateStr === 'string') {
-        // For strings with date and time like "1/13/2026  10:39:16 AM"
-        // First, try to extract just the date part before any time indicators
-        let dateOnlyStr = dateStr.trim();
-        
-        // Remove time portion - look for patterns like " 10:39:16 AM" or " 10:39 AM"
-        // Match space followed by time pattern (digits:digits:digits or digits:digits followed by AM/PM)
-        const timePattern = /\s+\d{1,2}:\d{2}(:\d{2})?\s*(AM|PM|am|pm)?/i;
-        if (timePattern.test(dateOnlyStr)) {
-            dateOnlyStr = dateOnlyStr.replace(timePattern, '').trim();
-        }
-        
-        // Try parsing the date-only string
-        dateObj = new Date(dateOnlyStr);
-        
-        // If that fails, try parsing the original string
-        if (isNaN(dateObj.getTime())) {
-            dateObj = new Date(dateStr);
-        }
     } else {
+        // String parsing - handles dates with or without time
         dateObj = new Date(dateStr);
     }
 
     if (dateObj && !isNaN(dateObj.getTime())) {
+        // Return YYYY-MM-DD format, automatically strips time
         return dateObj.toISOString().split('T')[0];
     }
 
-    // Final fallback: if it's a string, try to extract just the date part
+    // Fallback for generic string stripping time
     if (typeof dateStr === 'string') {
-        // Split by space and take first part (should be the date)
-        const parts = dateStr.trim().split(/\s+/);
-        if (parts.length > 0) {
-            const firstPart = parts[0];
-            // Try to parse just the first part
-            const fallbackDate = new Date(firstPart);
-            if (!isNaN(fallbackDate.getTime())) {
-                return fallbackDate.toISOString().split('T')[0];
-            }
+        // Try to extract date part from common formats
+        // Handle "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS" formats
+        const dateMatch = dateStr.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (dateMatch) {
+            return dateMatch[1];
+        }
+        // Handle "MM/DD/YYYY HH:MM:SS" or similar
+        if (dateStr.includes(' ')) {
+            return dateStr.split(' ')[0];
+        }
+        // Handle ISO format with 'T' separator
+        if (dateStr.includes('T')) {
+            return dateStr.split('T')[0];
         }
     }
 
-    return '';
+    return String(dateStr);
 };
 
 export const extractSheetInfo = (sheet: XLSX.WorkSheet): ExtractedSheetInfo => {

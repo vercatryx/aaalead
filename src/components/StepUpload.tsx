@@ -134,7 +134,7 @@ export const StepUpload: React.FC<StepUploadProps> = ({ onUpload, reportType, on
             positiveReadings: extracted.positiveReadings || 0,
             fullExcelData: extracted.fullExcelData,
             headerRowIndex: extracted.headerRowIndex,
-            Date: extracted.date || '', // Pass the extracted date to be used for prefilling
+            Date: extracted.date || '', // Include extracted date from Excel
         } as any);
     };
 

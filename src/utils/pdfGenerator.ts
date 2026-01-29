@@ -832,7 +832,7 @@ const flattenFormByManualDrawing = async (pdfDoc: PDFDocument, form: any): Promi
                                                 }
                                                 
                                                 // Calculate font size based on field height
-                                                const fontSize = Math.min(12, height * 0.7);
+                                                const fontSize = Math.min(9, height * 0.5);
                                                 
                                                 fieldsByPage.get(i)!.push({
                                                     field,
@@ -866,7 +866,7 @@ const flattenFormByManualDrawing = async (pdfDoc: PDFDocument, form: any): Promi
                             y: 50,
                             width: 200,
                             height: 20,
-                            fontSize: 12
+                            fontSize: 9
                         });
                     }
                 }
@@ -888,7 +888,7 @@ const flattenFormByManualDrawing = async (pdfDoc: PDFDocument, form: any): Promi
                     page.drawText(value, {
                         x,
                         y: textY,
-                        size: fontSize || 12,
+                        size: fontSize || 9,
                         font,
                         color: rgb(0, 0, 0),
                     });
@@ -1082,21 +1082,24 @@ export const flattenPdf = async (file: File): Promise<void> => {
             throw new Error('Invalid file type: Please select a PDF file');
         }
         
-        // Read file as array buffer
-        const arrayBuffer = await file.arrayBuffer();
-        const pdfBytes = new Uint8Array(arrayBuffer);
+        // Use server-side API route for flattening (more reliable)
+        const formData = new FormData();
+        formData.append('pdf', file);
         
-        // Load PDF document
-        const pdfDoc = await PDFDocument.load(pdfBytes);
-        console.log(`📄 Loaded PDF: ${file.name} (${pdfDoc.getPageCount()} pages)`);
+        console.log('📤 Sending PDF to server for flattening...');
+        const response = await fetch('/api/flatten-pdf', {
+            method: 'POST',
+            body: formData,
+        });
         
-        // Flatten the PDF using image-based method
-        await flattenFormAsImage(pdfDoc);
-        console.log('✅ PDF flattened successfully');
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            throw new Error(errorData.message || errorData.error || `Server error: ${response.status}`);
+        }
         
-        // Save flattened PDF
-        const flattenedBytes = await pdfDoc.save();
-        const blob = new Blob([flattenedBytes as any], { type: 'application/pdf' });
+        // Get flattened PDF as blob
+        const blob = await response.blob();
+        console.log('✅ PDF flattened successfully on server');
         
         // Create download link
         const link = document.createElement('a');
@@ -1571,6 +1574,24 @@ export const generatePDFReport = async (
 
                 field.setText(String(valueToFill));
                 
+                // Set smaller font size for text fields only (skip if field is invalid)
+                try {
+                    // Only try to set font size on TextField types and if field is valid
+                    if (field && 
+                        field.constructor.name && 
+                        field.constructor.name.includes('TextField') &&
+                        typeof (field as any).setFontSize === 'function') {
+                        (field as any).setFontSize(9); // Reduced font size
+                    }
+                } catch (fontSizeErr: any) {
+                    // Some fields may not support setFontSize, that's okay
+                    // Silently ignore - font size will be handled during flattening
+                    if (fontSizeErr?.message && !fontSizeErr.message.includes('defineProperty')) {
+                        // Only log if it's not the defineProperty error
+                        console.warn(`Could not set font size for field ${mapping.pdfFieldId}:`, fontSizeErr.message);
+                    }
+                }
+                
                 // Store phone field reference for later use in signature positioning
                 if (reportType === 'XHR' && (mapping.pdfFieldId === 'Phone' || mapping.pdfFieldId === 'phone')) {
                     try {
@@ -1634,12 +1655,20 @@ export const generatePDFReport = async (
                             if (textField) {
                                 // Write the user's text
                                 textField.setText(checkBoxText);
-                                // Set a large font size to make it big and obvious
+                                // Set font size for checkbox text
                                 try {
-                                    textField.setFontSize(24); // Large, obvious font size
-                                } catch (fontErr) {
-                                    // If setFontSize fails, try alternative approach
-                                    console.warn('Could not set font size:', fontErr);
+                                    // Only set font size if field is valid and supports it
+                                    if (textField && 
+                                        textField.constructor.name && 
+                                        textField.constructor.name.includes('TextField') &&
+                                        typeof textField.setFontSize === 'function') {
+                                        textField.setFontSize(12); // Reduced font size
+                                    }
+                                } catch (fontErr: any) {
+                                    // If setFontSize fails, silently ignore - font size will be handled during flattening
+                                    if (fontErr?.message && !fontErr.message.includes('defineProperty')) {
+                                        console.warn('Could not set font size for Check Box8:', fontErr.message);
+                                    }
                                 }
                                 // Ensure it's visible and on top
                                 (textField.updateAppearances as any)();

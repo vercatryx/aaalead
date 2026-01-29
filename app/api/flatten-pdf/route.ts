@@ -1,99 +1,42 @@
 import { NextResponse } from 'next/server'
-import { PDFDocument, StandardFonts } from 'pdf-lib'
+import { PDFDocument } from 'pdf-lib'
 import { writeFileSync, unlinkSync, readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { exec } from 'child_process'
 import { promisify } from 'util'
+import { tmpdir } from 'os'
 
 const execAsync = promisify(exec)
 
-// Helper function to fix text overflow in fields before flattening
-// This ensures that long text is visible after flattening by reducing font size to fit within boundaries
-const fixFieldTextOverflow = async (form: any, font: any): Promise<void> => {
-  console.log('🔧 Fixing text overflow in fields before flattening...')
-  
+// Helper function to find executable in PATH or common locations
+async function findExecutable(name: string): Promise<string | null> {
   try {
-    const fields = form.getFields()
-    let fixedCount = 0
-    
-    for (const field of fields) {
-      try {
-        // Only process text fields
-        if (field.constructor.name !== 'PDFTextField') {
-          continue
-        }
-        
-        const fieldName = field.getName()
-        const text = field.getText() || ''
-        
-        if (!text || text.trim().length === 0) {
-          continue // Skip empty fields
-        }
-        
-        // Try to get field dimensions from widget annotations
-        let fieldWidth = 0
-        let fieldHeight = 0
-        
-        try {
-          const acroField = (field as any).acroField
-          if (acroField) {
-            const kids = acroField.dict?.get('Kids')
-            if (kids && Array.isArray(kids) && kids.length > 0) {
-              const widget = kids[0]
-              const rect = widget.dict?.get('Rect')
-              if (rect && Array.isArray(rect) && rect.length >= 4) {
-                // Rect format: [x1, y1, x2, y2]
-                fieldWidth = Math.abs(rect[2] - rect[0])
-                fieldHeight = Math.abs(rect[3] - rect[1])
-              }
-            }
-          }
-        } catch (dimErr) {
-          // If we can't get dimensions, continue with default handling
-        }
-        
-        // If we have dimensions, check if text fits
-        if (fieldWidth > 0 && fieldHeight > 0) {
-          // Estimate text width (approximate: 0.6 * fontSize per character for Helvetica)
-          // Use a conservative estimate with default font size of 12
-          const estimatedCharWidth = 7.2 // 0.6 * 12
-          const estimatedTextWidth = text.length * estimatedCharWidth
-          
-          // If text is wider than field, reduce font size to fit
-          if (estimatedTextWidth > fieldWidth) {
-            // Calculate appropriate font size to fit text
-            // Leave some padding (10% on each side)
-            const availableWidth = fieldWidth * 0.8
-            const calculatedFontSize = Math.max(6, Math.min(12, (availableWidth / text.length) / 0.6))
-            
-            try {
-              if (typeof (field as any).setFontSize === 'function') {
-                (field as any).setFontSize(calculatedFontSize)
-                fixedCount++
-                console.log(`   ✓ Fixed field "${fieldName}": reduced font size to ${calculatedFontSize.toFixed(1)}`)
-              }
-            } catch (fontSizeErr) {
-              // If setFontSize fails, skip this field
-              console.warn(`   ⚠️ Could not set font size for field "${fieldName}"`)
-            }
-          }
-        }
-      } catch (fieldErr) {
-        // Continue processing other fields if one fails
-        console.warn(`   ⚠️ Could not fix field "${field.getName()}":`, fieldErr)
-      }
+    // Try to find in PATH
+    const { stdout } = await execAsync(`which ${name}`)
+    const path = stdout.trim()
+    if (path && existsSync(path)) {
+      return path
     }
-    
-    if (fixedCount > 0) {
-      console.log(`✅ Fixed text overflow in ${fixedCount} field(s) by reducing font size`)
-    } else {
-      console.log('✅ No text overflow issues found')
-    }
-  } catch (err: any) {
-    console.warn('⚠️ Error fixing text overflow:', err.message)
-    // Don't throw - continue with flattening even if overflow fix fails
+  } catch (e) {
+    // Not in PATH, try common locations
   }
+  
+  // Try common installation locations
+  const commonPaths = [
+    `/opt/homebrew/bin/${name}`, // Homebrew on Apple Silicon
+    `/usr/local/bin/${name}`, // Homebrew on Intel Mac / Linux
+    `/usr/bin/${name}`, // System-wide on Linux
+    `/${name}`, // Direct path (unlikely but try)
+  ]
+  
+  for (const path of commonPaths) {
+    if (existsSync(path)) {
+      return path
+    }
+  }
+  
+  return null
 }
 
 export async function POST(request: Request) {
@@ -120,8 +63,9 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(arrayBuffer)
     
     // STEP 1: Save the PDF to disk first
-    const __dirname = process.cwd()
-    tempPdfPath = join(__dirname, `temp_${randomUUID()}.pdf`)
+    // Use /tmp directory (works on both local and Vercel)
+    const tempDir = process.env.TMPDIR || tmpdir()
+    tempPdfPath = join(tempDir, `temp_${randomUUID()}.pdf`)
     console.log('💾 Saving finished PDF to disk first:', tempPdfPath)
     writeFileSync(tempPdfPath, buffer)
     console.log('✅ PDF saved to disk')
@@ -135,23 +79,30 @@ export async function POST(request: Request) {
     
     console.log(`📝 Found ${fields.length} form fields...`)
     
-    // Fix text overflow issues before updating appearances
-    // This ensures long text is visible after flattening
-    if (fields.length > 0) {
-      const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
-      await fixFieldTextOverflow(form, font)
-    }
-    
     // Update all field appearances to ensure values are rendered
     if (fields.length > 0) {
       console.log(`📝 Updating appearances for ${fields.length} fields...`)
       for (const field of fields) {
         try {
-          if (typeof (field as any).updateAppearances === 'function') {
-            await (field as any).updateAppearances()
+          // Validate field exists and is valid before calling methods
+          if (field && 
+              typeof field === 'object' && 
+              typeof (field as any).updateAppearances === 'function') {
+            // Wrap in additional try-catch to catch defineProperty errors
+            try {
+              await (field as any).updateAppearances()
+            } catch (updateErr: any) {
+              // Silently ignore defineProperty errors and other update errors
+              if (updateErr?.message && !updateErr.message.includes('defineProperty')) {
+                console.warn(`⚠️ Could not update appearance for field ${(field as any).getName?.() || 'unknown'}:`, updateErr.message)
+              }
+            }
           }
-        } catch (updateErr) {
-          // Some fields might not support updateAppearances, continue
+        } catch (fieldErr: any) {
+          // Skip invalid fields - some fields may be in an invalid state
+          if (fieldErr?.message && !fieldErr.message.includes('defineProperty')) {
+            console.warn('⚠️ Error processing field:', fieldErr.message)
+          }
         }
       }
     }
@@ -162,32 +113,43 @@ export async function POST(request: Request) {
     console.log('✅ PDF with updated appearances saved to disk')
     
     // STEP 3: Try to flatten using command-line tools (most reliable)
-    flattenedPdfPath = join(__dirname, `temp_flattened_${randomUUID()}.pdf`)
+    flattenedPdfPath = join(tempDir, `temp_flattened_${randomUUID()}.pdf`)
     let flattenSuccess = false
     
     // Method 1: Try qpdf (most reliable for flattening)
     try {
       console.log('🔄 Trying qpdf to flatten PDF...')
-      await execAsync(`qpdf --flatten-annotations=all "${tempPdfPath}" "${flattenedPdfPath}"`)
+      // Try to find qpdf executable
+      const qpdfPath = await findExecutable('qpdf')
+      const qpdfCmd = qpdfPath || 'qpdf'
+      console.log(`📍 Using qpdf at: ${qpdfCmd}`)
+      
+      await execAsync(`"${qpdfCmd}" --flatten-annotations=all "${tempPdfPath}" "${flattenedPdfPath}"`)
       if (existsSync(flattenedPdfPath)) {
         console.log('✅ PDF flattened successfully using qpdf')
         flattenSuccess = true
+      } else {
+        console.log('⚠️ qpdf command succeeded but output file not found')
       }
-    } catch (qpdfError) {
-      console.log('⚠️ qpdf not available or failed, trying next method...')
+    } catch (qpdfError: any) {
+      console.log('⚠️ qpdf not available or failed, trying next method...', qpdfError?.message || qpdfError)
     }
     
     // Method 2: Try pdftk
     if (!flattenSuccess) {
       try {
         console.log('🔄 Trying pdftk to flatten PDF...')
-        await execAsync(`pdftk "${tempPdfPath}" output "${flattenedPdfPath}" flatten`)
+        const pdftkPath = await findExecutable('pdftk')
+        const pdftkCmd = pdftkPath || 'pdftk'
+        console.log(`📍 Using pdftk at: ${pdftkCmd}`)
+        
+        await execAsync(`"${pdftkCmd}" "${tempPdfPath}" output "${flattenedPdfPath}" flatten`)
         if (existsSync(flattenedPdfPath)) {
           console.log('✅ PDF flattened successfully using pdftk')
           flattenSuccess = true
         }
-      } catch (pdftkError) {
-        console.log('⚠️ pdftk not available or failed, trying next method...')
+      } catch (pdftkError: any) {
+        console.log('⚠️ pdftk not available or failed, trying next method...', pdftkError?.message || pdftkError)
       }
     }
     
@@ -195,13 +157,17 @@ export async function POST(request: Request) {
     if (!flattenSuccess) {
       try {
         console.log('🔄 Trying ghostscript to flatten PDF...')
-        await execAsync(`gs -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -dPDFSETTINGS=/prepress -dCompatibilityLevel=1.4 -dColorImageResolution=300 -dGrayImageResolution=300 -dMonoImageResolution=300 -sOutputFile="${flattenedPdfPath}" "${tempPdfPath}"`)
+        const gsPath = await findExecutable('gs')
+        const gsCmd = gsPath || 'gs'
+        console.log(`📍 Using ghostscript at: ${gsCmd}`)
+        
+        await execAsync(`"${gsCmd}" -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -dPDFSETTINGS=/prepress -dCompatibilityLevel=1.4 -dColorImageResolution=300 -dGrayImageResolution=300 -dMonoImageResolution=300 -sOutputFile="${flattenedPdfPath}" "${tempPdfPath}"`)
         if (existsSync(flattenedPdfPath)) {
           console.log('✅ PDF flattened successfully using ghostscript')
           flattenSuccess = true
         }
-      } catch (gsError) {
-        console.log('⚠️ ghostscript not available or failed, trying pdf-lib method...')
+      } catch (gsError: any) {
+        console.log('⚠️ ghostscript not available or failed, trying pdf-lib method...', gsError?.message || gsError)
       }
     }
     
@@ -262,9 +228,15 @@ export async function POST(request: Request) {
         const formForFlatten = pdfDocForFlatten.getForm()
         
         try {
-          formForFlatten.flatten()
-        } catch (flattenErr) {
-          // If flatten doesn't work, continue
+          // Validate form exists before flattening
+          if (formForFlatten && typeof formForFlatten.flatten === 'function') {
+            formForFlatten.flatten()
+          }
+        } catch (flattenErr: any) {
+          // If flatten doesn't work, continue - this is expected for some PDFs
+          if (flattenErr?.message && !flattenErr.message.includes('defineProperty')) {
+            console.warn('⚠️ Could not flatten form:', flattenErr.message)
+          }
         }
         
         const flattenedBytes = await pdfDocForFlatten.save()
