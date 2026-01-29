@@ -174,7 +174,7 @@ const isCalibrationRow = (rowIndex: number, row: any[], calibrationColIndex: num
     return false;
 };
 
-// Helper to format date as MM/DD/YYYY (e.g., 1/13/2026)
+// Helper to format date as MM/DD/YYYY HH:MM or MM/DD/YYYY HH:MM:SS (preserves time if present)
 const formatDateForPDF = (dateStr: string | number | Date | undefined): string => {
     if (!dateStr) return '';
 
@@ -183,45 +183,79 @@ const formatDateForPDF = (dateStr: string | number | Date | undefined): string =
     if (dateStr instanceof Date) {
         dateObj = dateStr;
     } else if (typeof dateStr === 'number') {
-        // Excel serial date
+        // Excel serial date (includes time component)
         dateObj = new Date((dateStr - (25567 + 2)) * 86400 * 1000);
     } else if (typeof dateStr === 'string') {
         // Handle date strings - parse manually to avoid timezone issues
         const trimmed = dateStr.trim();
         
-        // First check if it's ISO format (YYYY-MM-DD) from HTML5 date input
-        const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-        if (isoMatch) {
-            const year = parseInt(isoMatch[1], 10);
-            const month = parseInt(isoMatch[2], 10);
-            const day = parseInt(isoMatch[3], 10);
+        // Check if it's ISO format with time (YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD HH:MM:SS)
+        const isoWithTimeMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[T ](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/);
+        if (isoWithTimeMatch) {
+            const year = parseInt(isoWithTimeMatch[1], 10);
+            const month = parseInt(isoWithTimeMatch[2], 10);
+            const day = parseInt(isoWithTimeMatch[3], 10);
+            const hours = parseInt(isoWithTimeMatch[4], 10);
+            const minutes = parseInt(isoWithTimeMatch[5], 10);
+            const seconds = isoWithTimeMatch[6] ? parseInt(isoWithTimeMatch[6], 10) : 0;
             // Create date in local timezone to avoid timezone conversion issues
-            dateObj = new Date(year, month - 1, day);
+            dateObj = new Date(year, month - 1, day, hours, minutes, seconds);
         }
-        // Check if it's in MM/DD/YYYY or M/D/YY format
+        // Check if it's ISO format without time (YYYY-MM-DD) from HTML5 date input
         else {
-            const dateMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-            if (dateMatch) {
-                let month = parseInt(dateMatch[1], 10);
-                let day = parseInt(dateMatch[2], 10);
-                let year = parseInt(dateMatch[3], 10);
-                
-                // Handle 2-digit years (assume 2000-2099)
-                if (year < 100) {
-                    year += 2000;
-                }
-                
+            const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+            if (isoMatch) {
+                const year = parseInt(isoMatch[1], 10);
+                const month = parseInt(isoMatch[2], 10);
+                const day = parseInt(isoMatch[3], 10);
                 // Create date in local timezone to avoid timezone conversion issues
                 dateObj = new Date(year, month - 1, day);
-                
-                // Validate the date is correct (handles invalid dates like Feb 30)
-                if (dateObj.getMonth() !== month - 1 || dateObj.getDate() !== day || dateObj.getFullYear() !== year) {
-                    // Invalid date, try standard parsing as fallback
-                    dateObj = new Date(trimmed);
+            }
+            // Check if it's in MM/DD/YYYY HH:MM:SS or MM/DD/YYYY HH:MM format
+            else {
+                const dateWithTimeMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/);
+                if (dateWithTimeMatch) {
+                    let month = parseInt(dateWithTimeMatch[1], 10);
+                    let day = parseInt(dateWithTimeMatch[2], 10);
+                    let year = parseInt(dateWithTimeMatch[3], 10);
+                    const hours = parseInt(dateWithTimeMatch[4], 10);
+                    const minutes = parseInt(dateWithTimeMatch[5], 10);
+                    const seconds = dateWithTimeMatch[6] ? parseInt(dateWithTimeMatch[6], 10) : 0;
+                    
+                    // Handle 2-digit years (assume 2000-2099)
+                    if (year < 100) {
+                        year += 2000;
+                    }
+                    
+                    // Create date in local timezone to avoid timezone conversion issues
+                    dateObj = new Date(year, month - 1, day, hours, minutes, seconds);
                 }
-            } else {
-                // Try parsing with standard Date constructor as fallback
-                dateObj = new Date(trimmed);
+                // Check if it's in MM/DD/YYYY or M/D/YY format (no time)
+                else {
+                    const dateMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+                    if (dateMatch) {
+                        let month = parseInt(dateMatch[1], 10);
+                        let day = parseInt(dateMatch[2], 10);
+                        let year = parseInt(dateMatch[3], 10);
+                        
+                        // Handle 2-digit years (assume 2000-2099)
+                        if (year < 100) {
+                            year += 2000;
+                        }
+                        
+                        // Create date in local timezone to avoid timezone conversion issues
+                        dateObj = new Date(year, month - 1, day);
+                        
+                        // Validate the date is correct (handles invalid dates like Feb 30)
+                        if (dateObj.getMonth() !== month - 1 || dateObj.getDate() !== day || dateObj.getFullYear() !== year) {
+                            // Invalid date, try standard parsing as fallback
+                            dateObj = new Date(trimmed);
+                        }
+                    } else {
+                        // Try parsing with standard Date constructor as fallback
+                        dateObj = new Date(trimmed);
+                    }
+                }
             }
         }
     }
@@ -231,7 +265,26 @@ const formatDateForPDF = (dateStr: string | number | Date | undefined): string =
         const month = dateObj.getMonth() + 1; // getMonth() returns 0-11
         const day = dateObj.getDate(); // getDate() returns local day
         const year = dateObj.getFullYear(); // getFullYear() returns local year
-        return `${month}/${day}/${year}`;
+        const hours = dateObj.getHours();
+        const minutes = dateObj.getMinutes();
+        const seconds = dateObj.getSeconds();
+        
+        // Format time component if it's not midnight (00:00:00)
+        // or if the original string had time information
+        const hasTime = hours !== 0 || minutes !== 0 || seconds !== 0 || 
+                       (typeof dateStr === 'string' && (dateStr.includes(':') || dateStr.includes('T')));
+        
+        if (hasTime) {
+            // Format as MM/DD/YYYY HH:MM:SS or MM/DD/YYYY HH:MM
+            if (seconds !== 0) {
+                return `${month}/${day}/${year} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            } else {
+                return `${month}/${day}/${year} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+            }
+        } else {
+            // No time component, return just the date
+            return `${month}/${day}/${year}`;
+        }
     }
 
     // If it's already in a format we can use, return as is
@@ -1963,7 +2016,7 @@ export const generatePDFReport = async (
         if (data.fullExcelData && data.fullExcelData.length > 0) {
             const totalPages = pdfDoc.getPageCount();
             // For XHR reports:
-            // - Positive reports: insert after page 6 (index 6)
+            // - Positive reports: insert after page 6 (index 7)
             // - Negative reports: insert before page 6 (index 5)
             // For other reports, insert before the last page
             let insertBeforeIndex: number;
@@ -1971,8 +2024,8 @@ export const generatePDFReport = async (
                 // Check if report is positive
                 const isPositive = data.isPositive ?? false;
                 if (isPositive) {
-                    // Insert at index 6 (after page 6) for positive reports
-                    insertBeforeIndex = 6;
+                    // Insert at index 7 (after page 6) for positive reports
+                    insertBeforeIndex = 7;
                 } else {
                     // Insert at index 5 (before page 6) for negative reports
                     insertBeforeIndex = 5;
@@ -2031,7 +2084,7 @@ export const generatePDFReport = async (
                         const pages = pdfDoc.getPages();
                         // Calculate page 6 index based on where Excel pages were inserted:
                         // - Negative reports: Excel at index 5, so page 6 is at index 5 + numExcelPagesInserted
-                        // - Positive reports: Excel at index 6 (after page 6), so page 6 stays at index 5
+                        // - Positive reports: Excel at index 7 (after page 6), so page 6 stays at index 5
                         const isPositive = data.isPositive ?? false;
                         const targetPageIndex = isPositive ? 5 : (5 + numExcelPagesInserted); // Page 6 (0-indexed, adjusted for Excel pages)
                         
@@ -2546,7 +2599,7 @@ export const generatePDFReport = async (
                 );
                 
                 if (isPositive) {
-                    // For positive reports: Excel pages are inserted at index 6 (after page 6),
+                    // For positive reports: Excel pages are inserted at index 7 (after page 6),
                     // so page 6 stays at index 5 (targetPageIndex)
                     const adjustedTargetPageIndex = targetPageIndex;
                     const totalPages = pdfDoc.getPageCount();
@@ -2571,7 +2624,7 @@ export const generatePDFReport = async (
 
         // 8b. Move original page 7 to position 6 (for XHR negative reports only)
         // For negative reports: Excel pages are inserted at index 5, so page 7 needs to be moved to position 6 (index 5)
-        // For positive reports: Excel pages are inserted at index 6 (after page 6), so page 7 stays in place
+        // For positive reports: Excel pages are inserted at index 7 (after page 6), so page 7 stays in place
         // IMPORTANT: Use copyPages to preserve the original page dimensions (especially for landscape pages)
         const isPositive = data.isPositive ?? false;
         if (reportType === 'XHR' && numExcelPagesInserted > 0 && !isPositive) {

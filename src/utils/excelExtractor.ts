@@ -12,7 +12,7 @@ export interface ExtractedSheetInfo {
     fullExcelData?: any[][]; // Full Excel data including header row
 }
 
-// Helper to format date YYYY-MM-DD (strips time component)
+// Helper to format date with time preserved (YYYY-MM-DD HH:MM:SS or YYYY-MM-DDTHH:MM:SS)
 const formatDate = (dateStr: string | number | Date): string => {
     if (!dateStr) return '';
 
@@ -21,7 +21,7 @@ const formatDate = (dateStr: string | number | Date): string => {
     if (dateStr instanceof Date) {
         dateObj = dateStr;
     } else if (typeof dateStr === 'number') {
-        // Excel serial date
+        // Excel serial date - includes time component
         dateObj = new Date((dateStr - (25567 + 2)) * 86400 * 1000);
     } else {
         // String parsing - handles dates with or without time
@@ -29,26 +29,28 @@ const formatDate = (dateStr: string | number | Date): string => {
     }
 
     if (dateObj && !isNaN(dateObj.getTime())) {
-        // Return YYYY-MM-DD format, automatically strips time
-        return dateObj.toISOString().split('T')[0];
+        // Return ISO format with time: YYYY-MM-DDTHH:MM:SS
+        // This preserves the time component
+        const year = dateObj.getFullYear();
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        const hours = String(dateObj.getHours()).padStart(2, '0');
+        const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+        const seconds = String(dateObj.getSeconds()).padStart(2, '0');
+        
+        // Return format: YYYY-MM-DDTHH:MM:SS
+        return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
     }
 
-    // Fallback for generic string stripping time
+    // Fallback: if it's already a string with time, preserve it
     if (typeof dateStr === 'string') {
-        // Try to extract date part from common formats
-        // Handle "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS" formats
-        const dateMatch = dateStr.match(/^(\d{4}-\d{2}-\d{2})/);
-        if (dateMatch) {
-            return dateMatch[1];
+        // If it already has time component, return as is
+        if (dateStr.includes('T') || (dateStr.includes(' ') && dateStr.match(/\d{1,2}:\d{2}/))) {
+            return dateStr;
         }
-        // Handle "MM/DD/YYYY HH:MM:SS" or similar
-        if (dateStr.includes(' ')) {
-            return dateStr.split(' ')[0];
-        }
-        // Handle ISO format with 'T' separator
-        if (dateStr.includes('T')) {
-            return dateStr.split('T')[0];
-        }
+        // If it's just a date, try to preserve any time that might be in the original
+        // For now, return the string as is - let the PDF formatter handle it
+        return dateStr;
     }
 
     return String(dateStr);

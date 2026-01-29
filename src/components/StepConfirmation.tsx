@@ -50,8 +50,35 @@ export const StepConfirmation: React.FC<StepConfirmationProps> = ({
         }
         
         // Date from Excel - use extracted date if available
-        if (initialFormData['Date'] === undefined || initialFormData['Date'] === '') {
-            initialFormData['Date'] = data['Date'] || data.date || '';
+        // Parse date to extract just the date part (YYYY-MM-DD) for HTML5 date input
+        // This preserves time in the raw data but only uses date for the input field
+        // Always parse the Date field if it exists, even if it's already set, to ensure it's in the correct format
+        const rawDate = initialFormData['Date'] || data['Date'] || data.date || '';
+        if (rawDate) {
+            // Check if it's already in the correct YYYY-MM-DD format (no time)
+            if (rawDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                // Already in correct format, use as is
+                initialFormData['Date'] = rawDate;
+            } else {
+                // Extract date part from formats like YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD HH:MM:SS
+                // First try to match ISO format with or without time
+                const isoMatch = rawDate.match(/^(\d{4}-\d{2}-\d{2})/);
+                if (isoMatch) {
+                    initialFormData['Date'] = isoMatch[1]; // YYYY-MM-DD format for HTML5 date input
+                } else {
+                    // Try to parse other formats (MM/DD/YYYY, etc.)
+                    const dateObj = new Date(rawDate);
+                    if (!isNaN(dateObj.getTime())) {
+                        const year = dateObj.getFullYear();
+                        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                        const day = String(dateObj.getDate()).padStart(2, '0');
+                        initialFormData['Date'] = `${year}-${month}-${day}`;
+                    } else {
+                        // Fallback: use as is (might cause validation error, but better than empty)
+                        initialFormData['Date'] = rawDate;
+                    }
+                }
+            }
         }
         
         // Today/Report Date - default to today if not set
