@@ -327,11 +327,11 @@ function App() {
       console.log(`✅ Successfully saved "${variableName}" to database`);
       
       // Then update local state
-      setGeneralVariables(prev => {
-        const updated = new Map(prev);
-        updated.set(variableName, variableValue);
-        return updated;
-      });
+    setGeneralVariables(prev => {
+      const updated = new Map(prev);
+      updated.set(variableName, variableValue);
+      return updated;
+    });
     } catch (error) {
       console.error(`❌ Error saving general variable "${variableName}":`, error);
       alert(`Failed to save ${variableName}. Please try again.`);
@@ -494,32 +494,51 @@ function App() {
         console.error('❌ Document not found in database after save!', error);
       }
       
-      // Small delay to ensure database transaction is committed
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Retry mechanism to handle read-after-write consistency issues
+      // This is especially important on Vercel where database connections might be pooled
+      // and there can be slight delays in seeing committed transactions
+      let reloadedDocs: Map<string, (Omit<Document, 'file'> & { file?: Blob; filePath?: string })[]> = new Map();
+      let foundDoc: (Omit<Document, 'file'> & { file?: Blob; filePath?: string }) | undefined;
+      const maxRetries = 5;
+      let retryCount = 0;
       
-      // Reload documents to get filePath from database
-      // This ensures filePath is available for previews
-      console.log('🔄 Reloading inspector documents after upload...');
-      const reloadedDocs = await loadInspectorDocuments();
-      console.log('📦 Reloaded documents:', {
-        inspectorCount: reloadedDocs.size,
-        totalDocs: Array.from(reloadedDocs.values()).flat().length,
-        inspectorIds: Array.from(reloadedDocs.keys()),
-        lookingForInspectorId: inspectorId,
-        lookingForDocumentId: documentId
-      });
+      while (retryCount < maxRetries) {
+        // Exponential backoff: 500ms, 1000ms, 2000ms, 3000ms, 4000ms
+        // Longer delays on Vercel to account for connection pooler latency
+        const delay = retryCount === 0 ? 500 : Math.min(500 + (retryCount * 500), 4000);
+        if (retryCount > 0) {
+          console.log(`⏳ Retry ${retryCount}/${maxRetries - 1}: Waiting ${delay}ms for database consistency...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+        
+        console.log(`🔄 Reloading inspector documents after upload (attempt ${retryCount + 1}/${maxRetries})...`);
+        reloadedDocs = await loadInspectorDocuments();
+        
+        // Check if our document is in the reloaded results
+        const inspectorDocs = reloadedDocs.get(inspectorId) || [];
+        foundDoc = inspectorDocs.find(d => d.id === documentId);
+        
+        if (foundDoc) {
+          console.log('✅ Found our document in reloaded results:', foundDoc);
+          break;
+        } else {
+          console.warn(`⚠️ Document NOT found in reloaded results (attempt ${retryCount + 1}):`, {
+            inspectorId,
+            documentId,
+            inspectorDocsCount: inspectorDocs.length,
+            inspectorDocsIds: inspectorDocs.map(d => d.id),
+            totalDocs: Array.from(reloadedDocs.values()).flat().length
+          });
+          retryCount++;
+        }
+      }
       
-      // Check if our document is in the reloaded results
-      const inspectorDocs = reloadedDocs.get(inspectorId) || [];
-      const foundDoc = inspectorDocs.find(d => d.id === documentId);
-      if (foundDoc) {
-        console.log('✅ Found our document in reloaded results:', foundDoc);
-      } else {
-        console.error('❌ Document NOT found in reloaded results!', {
+      if (!foundDoc && retryCount >= maxRetries) {
+        console.error('❌ Document NOT found after all retries! Will add manually via fallback.', {
           inspectorId,
           documentId,
-          inspectorDocsCount: inspectorDocs.length,
-          inspectorDocsIds: inspectorDocs.map(d => d.id)
+          totalDocs: Array.from(reloadedDocs.values()).flat().length,
+          inspectorIds: Array.from(reloadedDocs.keys())
         });
       }
       
@@ -536,9 +555,9 @@ function App() {
           }
           
           return {
-            ...d,
+          ...d,
             file: shouldUseOriginalFile ? document.file : d.file,
-            filePath: d.filePath
+          filePath: d.filePath
           } as Document & { filePath?: string };
         }));
       }
@@ -570,8 +589,23 @@ function App() {
         }
       }
       
+      // Log final state before setting
+      const finalInspectorDocs = reloadedMap.get(inspectorId) || [];
+      const finalDoc = finalInspectorDocs.find(d => d.id === documentId);
       console.log('✅ Setting inspector documents state with', reloadedMap.size, 'inspectors');
+      console.log('📋 Final state for inspector', inspectorId, ':', {
+        docCount: finalInspectorDocs.length,
+        docIds: finalInspectorDocs.map(d => d.id),
+        ourDocFound: !!finalDoc,
+        ourDocId: documentId
+      });
+      
       setInspectorDocuments(reloadedMap as Map<string, Document[]>);
+      
+      // Verify state was set (in next tick)
+      setTimeout(() => {
+        console.log('🔍 State verification: Document should now be visible in UI');
+      }, 100);
       
       console.log(`✅ Successfully uploaded ${file.name} to R2 with ID ${documentId}`);
     } catch (error: any) {
