@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
       }
       if (!foundInResults) {
         console.error(`❌ [${timestamp}] Document ${debugDocId} NOT FOUND in query results!`);
-        console.error(`📊 [${timestamp}] Inspector breakdown:`, Array.from(documents.entries()).map(([id, docs]) => ({
+        console.error(`📊 [${timestamp}] Inspector breakdown:`, (Array.from(documents.entries()) as [string, any[]][]).map(([id, docs]) => ({
           inspectorId: id,
           docCount: docs.length,
           docIds: docs.map((d: any) => d.id)
