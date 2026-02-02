@@ -1347,7 +1347,7 @@ export const generatePDFReport = async (
         const checkboxMapping = config.mappings.find(m => m.pdfFieldId === 'Check Box8');
         const otherMappings = config.mappings.filter(m => m.pdfFieldId !== 'Check Box8');
         
-        // Embed font for red "P" text (used for Numb1 and Numb2)
+        // Embed font for black text (used for Numb1 and Numb2)
         const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
         
         otherMappings.forEach(mapping => {
@@ -1519,11 +1519,10 @@ export const generatePDFReport = async (
                     valueToFill = formatDateForPDF(valueToFill);
                 }
                 
-                // Ensure Numb1 and Numb2 default to 0 if empty
+                // Skip filling Numb1 and Numb2 in regular form fields - they will be drawn as text overlay instead
                 if (reportType === 'XHR' && (mapping.pdfFieldId === 'Numb1' || mapping.pdfFieldId === 'Numb2')) {
-                    if (!valueToFill || valueToFill === '' || valueToFill === 'undefined' || valueToFill === 'null') {
-                        valueToFill = '0';
-                    }
+                    // Skip this field - don't fill it in the form, it will be drawn as text overlay later
+                    return;
                 }
 
                 // Special handling for Inspector name on page 5: append Permit number
@@ -1648,8 +1647,8 @@ export const generatePDFReport = async (
                     }
                 }
                 
-                // Note: Red numbers for Numb1 and Numb2 are drawn later (after all fields are filled)
-                // This ensures they appear on top of the original field values
+                // Note: Black numbers for Numb1 and Numb2 are drawn later (after all fields are filled)
+                // These fields are NOT filled in the regular form - only drawn as text overlay
                 
                 // Store phone field reference for later use in signature positioning
                 if (reportType === 'XHR' && (mapping.pdfFieldId === 'Phone' || mapping.pdfFieldId === 'phone')) {
@@ -2706,8 +2705,9 @@ export const generatePDFReport = async (
         // Note: Page 6 rotation is handled during flattening by preserving correct dimensions
         // No additional rotation needed - dimensions are preserved correctly
 
-        // 9. Draw red numbers for Numb1 and Numb2 fields on page 4 AFTER all processing (including flattening)
-        // This ensures the red numbers are not removed by the flattening process
+        // 9. Draw black numbers for Numb1 and Numb2 fields on page 4 AFTER all processing (including flattening)
+        // This ensures the numbers are not removed by the flattening process
+        // These fields are NOT filled in the regular form fields - only drawn as text overlay
         if (reportType === 'XHR') {
             try {
                 const pages = pdfDoc.getPages();
@@ -2721,7 +2721,7 @@ export const generatePDFReport = async (
                     const numb1Value = String(data['Numb1'] || data.totalReadings || '0');
                     const numb2Value = String(data['Numb2'] || data.positiveReadings || '0');
                     
-                    console.log(`🔍 Drawing red numbers on page 4 (index ${page4Index}) AFTER flattening: Numb1="${numb1Value}", Numb2="${numb2Value}"`);
+                    console.log(`🔍 Drawing black numbers on page 4 (index ${page4Index}) AFTER flattening: Numb1="${numb1Value}", Numb2="${numb2Value}"`);
                     
                     // Known coordinates from field inspection:
                     // Numb1: X: 188.475, Y: 364.472, Width: 21.465, Height: 13.319
@@ -2737,7 +2737,7 @@ export const generatePDFReport = async (
                         y: numb1Y,
                         size: 10,
                         font: boldFont,
-                        color: rgb(1, 0, 0), // Red color
+                        color: rgb(0, 0, 0), // Black color
                     });
                     
                     // Draw Numb2 value with small offset: slightly to the right and slightly lower
@@ -2749,16 +2749,16 @@ export const generatePDFReport = async (
                         y: numb2Y,
                         size: 10,
                         font: boldFont,
-                        color: rgb(1, 0, 0), // Red color
+                        color: rgb(0, 0, 0), // Black color
                     });
                     
-                    console.log(`✅ Drew red "${numb1Value}" for Numb1 on page 4 (index ${page4Index}) at (${numb1X}, ${numb1Y}) AFTER flattening`);
-                    console.log(`✅ Drew red "${numb2Value}" for Numb2 on page 4 (index ${page4Index}) at (${numb2X}, ${numb2Y}) AFTER flattening`);
+                    console.log(`✅ Drew black "${numb1Value}" for Numb1 on page 4 (index ${page4Index}) at (${numb1X}, ${numb1Y}) AFTER flattening`);
+                    console.log(`✅ Drew black "${numb2Value}" for Numb2 on page 4 (index ${page4Index}) at (${numb2X}, ${numb2Y}) AFTER flattening`);
                 } else {
                     console.warn(`⚠️ Page 4 (index ${page4Index}) not found. Total pages: ${pages.length}`);
                 }
             } catch (pErr: any) {
-                console.error('❌ Error drawing red numbers on page 4 AFTER flattening:', pErr.message, pErr.stack);
+                console.error('❌ Error drawing black numbers on page 4 AFTER flattening:', pErr.message, pErr.stack);
             }
         }
 
