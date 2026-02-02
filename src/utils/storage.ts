@@ -413,7 +413,9 @@ export const saveGeneralTypedDocuments = async (documents: Map<string, Document>
 
 export const loadInspectorDocuments = async (): Promise<Map<string, (Omit<Document, 'file'> & { file?: Blob; filePath?: string })[]>> => {
   try {
-    const data = await apiCall('/api/documents/inspector');
+    // Add cache-busting query parameter to ensure fresh data
+    const cacheBuster = `?t=${Date.now()}`;
+    const data = await apiCall(`/api/documents/inspector${cacheBuster}`);
     const map = new Map<string, (Omit<Document, 'file'> & { file?: Blob; filePath?: string })[]>();
 
     for (const [inspectorId, docs] of Object.entries(data)) {

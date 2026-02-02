@@ -256,10 +256,19 @@ export async function getGeneralTypedDocuments() {
 export async function getInspectorDocuments() {
   return safeDbCall(async () => {
     const pool = await getDatabase();
-    const result = await pool.query('SELECT * FROM documents WHERE category = $1', ['inspector']);
+    // Filter out documents with null inspector_id to avoid grouping issues
+    const result = await pool.query(
+      'SELECT * FROM documents WHERE category = $1 AND inspector_id IS NOT NULL ORDER BY uploaded_at DESC', 
+      ['inspector']
+    );
     const map = new Map();
     for (const row of result.rows) {
       const inspectorId = row.inspector_id;
+      // Skip if inspector_id is still null (shouldn't happen with the query, but be safe)
+      if (!inspectorId) {
+        console.warn(`Skipping document ${row.id} with null inspector_id`);
+        continue;
+      }
       if (!map.has(inspectorId)) {
         map.set(inspectorId, []);
       }

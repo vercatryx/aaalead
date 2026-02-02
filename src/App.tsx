@@ -473,19 +473,104 @@ function App() {
         throw new Error('File object was lost during processing. Please try uploading again.');
       }
       
+      // Update state optimistically first so the document appears immediately
+      setInspectorDocuments(newMap);
+      
+      // Save to database
       await saveInspectorDocuments(newMap);
+      
+      // Verify the document was saved by querying it directly
+      console.log(`🔍 Verifying document ${documentId} was saved to database...`);
+      try {
+        const savedDoc = await apiCall(`/api/documents/${documentId}`);
+        console.log('✅ Document found in database:', {
+          id: savedDoc.id,
+          fileName: savedDoc.fileName,
+          inspectorId: savedDoc.inspectorId,
+          documentType: savedDoc.documentType,
+          filePath: savedDoc.filePath
+        });
+      } catch (error) {
+        console.error('❌ Document not found in database after save!', error);
+      }
+      
+      // Small delay to ensure database transaction is committed
+      await new Promise(resolve => setTimeout(resolve, 300));
       
       // Reload documents to get filePath from database
       // This ensures filePath is available for previews
+      console.log('🔄 Reloading inspector documents after upload...');
       const reloadedDocs = await loadInspectorDocuments();
-      const reloadedMap = new Map<string, (Document & { filePath?: string })[]>();
-      for (const [inspectorId, docs] of reloadedDocs.entries()) {
-        reloadedMap.set(inspectorId, docs.map(d => ({
-          ...d,
-          file: d.file && d.file.size > 0 ? d.file : document.file, // Keep the original file if reloaded one is empty
-          filePath: d.filePath
-        } as Document & { filePath?: string })));
+      console.log('📦 Reloaded documents:', {
+        inspectorCount: reloadedDocs.size,
+        totalDocs: Array.from(reloadedDocs.values()).flat().length,
+        inspectorIds: Array.from(reloadedDocs.keys()),
+        lookingForInspectorId: inspectorId,
+        lookingForDocumentId: documentId
+      });
+      
+      // Check if our document is in the reloaded results
+      const inspectorDocs = reloadedDocs.get(inspectorId) || [];
+      const foundDoc = inspectorDocs.find(d => d.id === documentId);
+      if (foundDoc) {
+        console.log('✅ Found our document in reloaded results:', foundDoc);
+      } else {
+        console.error('❌ Document NOT found in reloaded results!', {
+          inspectorId,
+          documentId,
+          inspectorDocsCount: inspectorDocs.length,
+          inspectorDocsIds: inspectorDocs.map(d => d.id)
+        });
       }
+      
+      const reloadedMap = new Map<string, (Document & { filePath?: string })[]>();
+      for (const [inspectorIdKey, docs] of reloadedDocs.entries()) {
+        reloadedMap.set(inspectorIdKey, docs.map(d => {
+          // Preserve the original file if the reloaded one is empty or missing
+          // This is important because R2 file loading might fail or be slow
+          const hasValidFile = d.file && d.file.size > 0;
+          const shouldUseOriginalFile = !hasValidFile && document.id === d.id;
+          
+          if (shouldUseOriginalFile) {
+            console.log(`📎 Preserving original file for document ${d.id} (${d.fileName})`);
+          }
+          
+          return {
+            ...d,
+            file: shouldUseOriginalFile ? document.file : d.file,
+            filePath: d.filePath
+          } as Document & { filePath?: string };
+        }));
+      }
+      
+      // If our document wasn't found in the reloaded results, add it manually
+      // This can happen due to timing issues or query problems
+      if (!foundDoc) {
+        console.log('⚠️ Document not in reloaded results, adding it manually...');
+        const inspectorDocs = reloadedMap.get(inspectorId) || [];
+        // Check if document already exists (shouldn't, but be safe)
+        const existingIndex = inspectorDocs.findIndex(d => d.id === documentId);
+        if (existingIndex === -1) {
+          // Get filePath from the saved document if available
+          let filePath = document.filePath;
+          try {
+            const savedDoc = await apiCall(`/api/documents/${documentId}`);
+            filePath = savedDoc.filePath;
+            console.log('📎 Got filePath from database:', filePath);
+          } catch (error) {
+            console.warn('Could not get filePath from database, using from document:', error);
+          }
+          
+          inspectorDocs.push({
+            ...document,
+            filePath: filePath
+          } as Document & { filePath?: string });
+          reloadedMap.set(inspectorId, inspectorDocs);
+          console.log('✅ Added document manually to reloaded map');
+        }
+      }
+      
+      console.log('✅ Setting inspector documents state with', reloadedMap.size, 'inspectors');
       setInspectorDocuments(reloadedMap as Map<string, Document[]>);
       
       console.log(`✅ Successfully uploaded ${file.name} to R2 with ID ${documentId}`);

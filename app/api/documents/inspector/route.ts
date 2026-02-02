@@ -16,7 +16,12 @@ export async function GET() {
         filePath: d.filePath
       }));
     }
-    return NextResponse.json(result);
+    const response = NextResponse.json(result);
+    // Prevent caching to ensure fresh data
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    response.headers.set('Pragma', 'no-cache');
+    response.headers.set('Expires', '0');
+    return response;
   } catch (error: any) {
     console.error('Error getting inspector documents:', error);
     const isDevelopment = process.env.NODE_ENV === 'development';
