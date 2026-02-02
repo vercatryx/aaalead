@@ -317,12 +317,25 @@ function App() {
   };
 
   const handleUpdateGeneralVariable = async (variableName: string, variableValue: string) => {
-    setGeneralVariables(prev => {
-      const updated = new Map(prev);
-      updated.set(variableName, variableValue);
-      saveGeneralVariables(updated).catch(console.error);
-      return updated;
-    });
+    try {
+      // Save directly to database first
+      console.log(`💾 Saving general variable "${variableName}" = "${variableValue}"`);
+      await apiCall(`/api/general-variables/${encodeURIComponent(variableName)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ value: variableValue }),
+      });
+      console.log(`✅ Successfully saved "${variableName}" to database`);
+      
+      // Then update local state
+      setGeneralVariables(prev => {
+        const updated = new Map(prev);
+        updated.set(variableName, variableValue);
+        return updated;
+      });
+    } catch (error) {
+      console.error(`❌ Error saving general variable "${variableName}":`, error);
+      alert(`Failed to save ${variableName}. Please try again.`);
+    }
   };
 
   const handleDeleteGeneralVariable = async (variableName: string) => {

@@ -441,14 +441,16 @@ export const Documents: React.FC<DocumentsProps> = ({
                             onChange={(e) => {
                               setEditingVariableValue(e.target.value);
                             }}
-                            onBlur={() => {
-                              onUpdateGeneralVariable(varName, editingVariableValue);
+                            onBlur={async () => {
+                              console.log(`💾 Saving ${varName} on blur: "${editingVariableValue}"`);
+                              await onUpdateGeneralVariable(varName, editingVariableValue);
                               setEditingVariable(null);
                               setEditingVariableValue('');
                             }}
-                            onKeyDown={(e) => {
+                            onKeyDown={async (e) => {
                               if (e.key === 'Enter') {
-                                onUpdateGeneralVariable(varName, editingVariableValue);
+                                console.log(`💾 Saving ${varName} on Enter: "${editingVariableValue}"`);
+                                await onUpdateGeneralVariable(varName, editingVariableValue);
                                 setEditingVariable(null);
                                 setEditingVariableValue('');
                               } else if (e.key === 'Escape') {
