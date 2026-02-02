@@ -256,19 +256,24 @@ export async function getGeneralTypedDocuments() {
 export async function getInspectorDocuments() {
   return safeDbCall(async () => {
     const pool = await getDatabase();
-    // Filter out documents with null inspector_id to avoid grouping issues
-    const result = await pool.query(
-      'SELECT * FROM documents WHERE category = $1 AND inspector_id IS NOT NULL ORDER BY uploaded_at DESC', 
-      ['inspector']
-    );
+    const timestamp = new Date().toISOString();
+    console.log(`🔍 [${timestamp}] [DB] Executing query: SELECT * FROM documents WHERE category = 'inspector'`);
+    
+    const result = await pool.query('SELECT * FROM documents WHERE category = $1', ['inspector']);
+    
+    console.log(`📊 [${timestamp}] [DB] Query returned ${result.rows.length} rows`);
+    if (result.rows.length > 0) {
+      console.log(`📋 [${timestamp}] [DB] Document IDs from query:`, result.rows.map(r => ({
+        id: r.id,
+        inspector_id: r.inspector_id,
+        document_type: r.document_type,
+        file_name: r.file_name
+      })));
+    }
+    
     const map = new Map();
     for (const row of result.rows) {
       const inspectorId = row.inspector_id;
-      // Skip if inspector_id is still null (shouldn't happen with the query, but be safe)
-      if (!inspectorId) {
-        console.warn(`Skipping document ${row.id} with null inspector_id`);
-        continue;
-      }
       if (!map.has(inspectorId)) {
         map.set(inspectorId, []);
       }
@@ -282,6 +287,8 @@ export async function getInspectorDocuments() {
         filePath: row.file_path
       });
     }
+    
+    console.log(`✅ [${timestamp}] [DB] Returning map with ${map.size} inspectors`);
     return map;
   }, new Map());
 }
@@ -306,6 +313,39 @@ export async function getDocumentsByCategory(category, documentType, inspectorId
     [category, documentType]
   );
   return result.rows;
+}
+
+// Get all documents for a specific inspector (bypasses connection pooling issues)
+export async function getInspectorDocumentsById(inspectorId) {
+  return safeDbCall(async () => {
+    const pool = await getDatabase();
+    const timestamp = new Date().toISOString();
+    console.log(`🔍 [${timestamp}] [DB] Querying documents for inspector ${inspectorId}`);
+    
+    const result = await pool.query(
+      'SELECT * FROM documents WHERE category = $1 AND inspector_id = $2 ORDER BY uploaded_at DESC',
+      ['inspector', inspectorId]
+    );
+    
+    console.log(`📊 [${timestamp}] [DB] Found ${result.rows.length} documents for inspector ${inspectorId}`);
+    if (result.rows.length > 0) {
+      console.log(`📋 [${timestamp}] [DB] Document IDs:`, result.rows.map(r => ({
+        id: r.id,
+        document_type: r.document_type,
+        file_name: r.file_name
+      })));
+    }
+    
+    return result.rows.map(row => ({
+      id: row.id,
+      fileName: row.file_name,
+      uploadedAt: new Date(row.uploaded_at),
+      category: row.category,
+      inspectorId: row.inspector_id,
+      documentType: row.document_type,
+      filePath: row.file_path
+    }));
+  }, []);
 }
 
 export async function deleteDocumentByType(documentType, category) {

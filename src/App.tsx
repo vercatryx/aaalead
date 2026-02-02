@@ -481,72 +481,94 @@ function App() {
       
       // Verify the document was saved by querying it directly
       console.log(`🔍 Verifying document ${documentId} was saved to database...`);
+      let savedDoc: any = null;
       try {
-        const savedDoc = await apiCall(`/api/documents/${documentId}`);
+        savedDoc = await apiCall(`/api/documents/${documentId}`);
+        const previewUrl = savedDoc.filePath ? `/api/files/${encodeURIComponent(savedDoc.filePath)}` : 'N/A';
         console.log('✅ Document found in database:', {
           id: savedDoc.id,
           fileName: savedDoc.fileName,
           inspectorId: savedDoc.inspectorId,
           documentType: savedDoc.documentType,
-          filePath: savedDoc.filePath
+          filePath: savedDoc.filePath,
+          previewUrl: previewUrl
         });
+        console.log(`🔗 Preview URL: ${getApiUrl()}${previewUrl}`);
       } catch (error) {
         console.error('❌ Document not found in database after save!', error);
       }
       
-      // Retry mechanism to handle read-after-write consistency issues
-      // This is especially important on Vercel where database connections might be pooled
-      // and there can be slight delays in seeing committed transactions
-      let reloadedDocs: Map<string, (Omit<Document, 'file'> & { file?: Blob; filePath?: string })[]> = new Map();
+      // Query the specific inspector's documents directly to bypass connection pooling issues
+      // This is more reliable than querying all documents and filtering
+      console.log(`🔄 Querying documents for inspector ${inspectorId} directly...`);
+      let inspectorDocsFromApi: any[] = [];
       let foundDoc: (Omit<Document, 'file'> & { file?: Blob; filePath?: string }) | undefined;
-      const maxRetries = 5;
+      const maxRetries = 3;
       let retryCount = 0;
       
       while (retryCount < maxRetries) {
-        // Exponential backoff: 500ms, 1000ms, 2000ms, 3000ms, 4000ms
-        // Longer delays on Vercel to account for connection pooler latency
-        const delay = retryCount === 0 ? 500 : Math.min(500 + (retryCount * 500), 4000);
+        const delay = retryCount === 0 ? 200 : Math.min(200 + (retryCount * 300), 1000);
         if (retryCount > 0) {
           console.log(`⏳ Retry ${retryCount}/${maxRetries - 1}: Waiting ${delay}ms for database consistency...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
         
-        console.log(`🔄 Reloading inspector documents after upload (attempt ${retryCount + 1}/${maxRetries})...`);
-        reloadedDocs = await loadInspectorDocuments();
-        
-        // Check if our document is in the reloaded results
-        const inspectorDocs = reloadedDocs.get(inspectorId) || [];
-        foundDoc = inspectorDocs.find(d => d.id === documentId);
-        
-        if (foundDoc) {
-          console.log('✅ Found our document in reloaded results:', foundDoc);
-          break;
-        } else {
-          console.warn(`⚠️ Document NOT found in reloaded results (attempt ${retryCount + 1}):`, {
-            inspectorId,
-            documentId,
-            inspectorDocsCount: inspectorDocs.length,
-            inspectorDocsIds: inspectorDocs.map(d => d.id),
-            totalDocs: Array.from(reloadedDocs.values()).flat().length
-          });
+        try {
+          const API_BASE = getApiUrl();
+          const response = await fetch(`${API_BASE}/api/inspectors/${inspectorId}/documents?t=${Date.now()}`);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch inspector documents: ${response.statusText}`);
+          }
+          inspectorDocsFromApi = await response.json();
+          
+          foundDoc = inspectorDocsFromApi.find((d: any) => d.id === documentId);
+          
+          if (foundDoc) {
+            console.log(`✅ Found document ${documentId} in inspector's documents (attempt ${retryCount + 1}):`, {
+              id: foundDoc.id,
+              fileName: foundDoc.fileName,
+              documentType: foundDoc.documentType,
+              filePath: foundDoc.filePath
+            });
+            break;
+          } else {
+            console.warn(`⚠️ Document NOT found in inspector's documents (attempt ${retryCount + 1}):`, {
+              inspectorId,
+              documentId,
+              inspectorDocsCount: inspectorDocsFromApi.length,
+              inspectorDocsIds: inspectorDocsFromApi.map((d: any) => d.id)
+            });
+            retryCount++;
+          }
+        } catch (error: any) {
+          console.error(`❌ Error querying inspector documents (attempt ${retryCount + 1}):`, error);
           retryCount++;
         }
       }
       
-      if (!foundDoc && retryCount >= maxRetries) {
-        console.error('❌ Document NOT found after all retries! Will add manually via fallback.', {
+      if (!foundDoc) {
+        const previewUrl = savedDoc?.filePath ? `/api/files/${encodeURIComponent(savedDoc.filePath)}` : 'N/A';
+        console.error('❌ Document NOT found after querying inspector directly! Will add manually via fallback.', {
           inspectorId,
           documentId,
-          totalDocs: Array.from(reloadedDocs.values()).flat().length,
-          inspectorIds: Array.from(reloadedDocs.keys())
+          inspectorDocsCount: inspectorDocsFromApi.length,
+          inspectorDocsIds: inspectorDocsFromApi.map((d: any) => d.id),
+          documentFilePath: savedDoc?.filePath || 'unknown',
+          previewUrl: savedDoc?.filePath ? `${getApiUrl()}${previewUrl}` : 'N/A'
         });
+        console.error(`🔗 Document preview URL (should work): ${getApiUrl()}${previewUrl}`);
+        console.error(`📋 Direct inspector documents API: ${getApiUrl()}/api/inspectors/${inspectorId}/documents`);
       }
       
+      // Load all inspector documents for the full state update
+      const reloadedDocs = await loadInspectorDocuments(documentId);
+      
       const reloadedMap = new Map<string, (Document & { filePath?: string })[]>();
+      
+      // Update the map with all existing documents
       for (const [inspectorIdKey, docs] of reloadedDocs.entries()) {
         reloadedMap.set(inspectorIdKey, docs.map(d => {
           // Preserve the original file if the reloaded one is empty or missing
-          // This is important because R2 file loading might fail or be slow
           const hasValidFile = d.file && d.file.size > 0;
           const shouldUseOriginalFile = !hasValidFile && document.id === d.id;
           
@@ -555,29 +577,46 @@ function App() {
           }
           
           return {
-          ...d,
+            ...d,
             file: shouldUseOriginalFile ? document.file : d.file,
-          filePath: d.filePath
+            filePath: d.filePath
           } as Document & { filePath?: string };
         }));
       }
       
-      // If our document wasn't found in the reloaded results, add it manually
-      // This can happen due to timing issues or query problems
-      if (!foundDoc) {
-        console.log('⚠️ Document not in reloaded results, adding it manually...');
+      // If we found the document via direct query, ensure it's in the map
+      // If not found, add it manually using the direct query results or fallback
+      if (foundDoc) {
+        // Document was found via direct query - ensure it's in the map
         const inspectorDocs = reloadedMap.get(inspectorId) || [];
-        // Check if document already exists (shouldn't, but be safe)
+        const existingIndex = inspectorDocs.findIndex(d => d.id === documentId);
+        if (existingIndex === -1) {
+          // Add it from the direct query results
+          console.log('📎 Adding document from direct query to map...');
+          inspectorDocs.push({
+            ...foundDoc,
+            file: document.file, // Use the original file
+            filePath: foundDoc.filePath
+          } as Document & { filePath?: string });
+          reloadedMap.set(inspectorId, inspectorDocs);
+          console.log('✅ Added document from direct query to reloaded map');
+        }
+      } else {
+        // Document wasn't found even via direct query - add it manually as fallback
+        console.log('⚠️ Document not found even via direct query, adding it manually...');
+        const inspectorDocs = reloadedMap.get(inspectorId) || [];
         const existingIndex = inspectorDocs.findIndex(d => d.id === documentId);
         if (existingIndex === -1) {
           // Get filePath from the saved document if available
-          let filePath = document.filePath;
-          try {
-            const savedDoc = await apiCall(`/api/documents/${documentId}`);
-            filePath = savedDoc.filePath;
-            console.log('📎 Got filePath from database:', filePath);
-          } catch (error) {
-            console.warn('Could not get filePath from database, using from document:', error);
+          let filePath = document.filePath || savedDoc?.filePath;
+          if (!filePath) {
+            try {
+              const savedDocRetry = await apiCall(`/api/documents/${documentId}`);
+              filePath = savedDocRetry.filePath;
+              console.log('📎 Got filePath from database:', filePath);
+            } catch (error) {
+              console.warn('Could not get filePath from database, using from document:', error);
+            }
           }
           
           inspectorDocs.push({

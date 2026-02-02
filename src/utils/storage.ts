@@ -411,10 +411,11 @@ export const saveGeneralTypedDocuments = async (documents: Map<string, Document>
   }
 };
 
-export const loadInspectorDocuments = async (): Promise<Map<string, (Omit<Document, 'file'> & { file?: Blob; filePath?: string })[]>> => {
+export const loadInspectorDocuments = async (debugDocId?: string): Promise<Map<string, (Omit<Document, 'file'> & { file?: Blob; filePath?: string })[]>> => {
   try {
     // Add cache-busting query parameter to ensure fresh data
-    const cacheBuster = `?t=${Date.now()}`;
+    const cacheBuster = `?t=${Date.now()}${debugDocId ? `&debugDocId=${encodeURIComponent(debugDocId)}` : ''}`;
+    console.log(`📥 Loading inspector documents${debugDocId ? ` (debugging doc: ${debugDocId})` : ''}...`);
     const data = await apiCall(`/api/documents/inspector${cacheBuster}`);
     const map = new Map<string, (Omit<Document, 'file'> & { file?: Blob; filePath?: string })[]>();
 
