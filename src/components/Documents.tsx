@@ -71,6 +71,7 @@ export const Documents: React.FC<DocumentsProps> = ({
   const [newDocumentType, setNewDocumentType] = useState('');
   const [newVariable, setNewVariable] = useState<{ name: string; value: string } | null>(null);
   const [editingVariable, setEditingVariable] = useState<string | null>(null);
+  const [editingVariableValue, setEditingVariableValue] = useState<string>('');
   const [flatteningPdf, setFlatteningPdf] = useState(false);
 
   const handleAddInspector = () => {
@@ -436,15 +437,23 @@ export const Documents: React.FC<DocumentsProps> = ({
                         {editingVariable === varName ? (
                           <input
                             type="text"
-                            value={varValue}
+                            value={editingVariableValue}
                             onChange={(e) => {
-                              onUpdateGeneralVariable(varName, e.target.value);
-                              setEditingVariable(null);
+                              setEditingVariableValue(e.target.value);
                             }}
-                            onBlur={() => setEditingVariable(null)}
+                            onBlur={() => {
+                              onUpdateGeneralVariable(varName, editingVariableValue);
+                              setEditingVariable(null);
+                              setEditingVariableValue('');
+                            }}
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter' || e.key === 'Escape') {
+                              if (e.key === 'Enter') {
+                                onUpdateGeneralVariable(varName, editingVariableValue);
                                 setEditingVariable(null);
+                                setEditingVariableValue('');
+                              } else if (e.key === 'Escape') {
+                                setEditingVariable(null);
+                                setEditingVariableValue('');
                               }
                             }}
                             className="flex-1 px-2 py-0.5 bg-white border border-slate-300 rounded text-xs text-slate-900"
@@ -454,7 +463,10 @@ export const Documents: React.FC<DocumentsProps> = ({
                           <>
                             <span className="flex-1 text-slate-600 truncate">{varValue}</span>
                             <button
-                              onClick={() => setEditingVariable(varName)}
+                              onClick={() => {
+                                setEditingVariable(varName);
+                                setEditingVariableValue(varValue);
+                              }}
                               className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-blue-100 rounded text-blue-600"
                               title="Edit"
                             >
