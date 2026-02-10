@@ -103,7 +103,7 @@ export function getConnectionConfig() {
       max: 1,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 15000,
-      allowExitOnIdle: isVercel, // Release when idle on serverless to reduce connection churn
+      allowExitOnIdle: !!isVercel, // Release when idle on serverless to reduce connection churn
     };
   }
 

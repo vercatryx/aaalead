@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getConnectionConfig, getDatabase, isDatabaseAvailable, resetDatabaseConnection } from '../../../db/database.js';
 import pg from 'pg';
-import type { PoolClient } from 'pg';
+import type { PoolClient, PoolConfig } from 'pg';
 const { Pool } = pg;
 
 export async function GET() {
@@ -51,7 +51,11 @@ export async function GET() {
     // Also try a fresh connection test (bypassing cached pool)
     let freshTest = null;
     try {
-      const testPool = new Pool(config);
+      const poolConfig: PoolConfig = {
+        ...config,
+        allowExitOnIdle: Boolean(config.allowExitOnIdle),
+      };
+      const testPool = new Pool(poolConfig);
       const testClient: PoolClient = await Promise.race([
         testPool.connect(),
         new Promise<never>((_, reject) => 
