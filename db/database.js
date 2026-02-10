@@ -40,18 +40,20 @@ export function getConnectionConfig() {
   // This allows trying direct on Vercel if explicitly enabled
   const useDirectConnection = !disableDirect && (forceDirect || (!isVercel && !forcePooler));
 
-  // If DATABASE_URL is provided, use it directly
+  // If DATABASE_URL is provided, use it directly (prefer port 6543 on Vercel to avoid "max clients reached")
   if (process.env.DATABASE_URL) {
+    let connectionString = process.env.DATABASE_URL;
+    if (connectionString.includes(':6543/') && !connectionString.includes('pgbouncer=true')) {
+      const sep = connectionString.includes('?') ? '&' : '?';
+      connectionString = `${connectionString}${sep}pgbouncer=true`;
+    }
     return {
-      connectionString: process.env.DATABASE_URL,
-      ssl: {
-        rejectUnauthorized: false // Supabase requires SSL
-      },
-      // Connection pool settings
-      max: 20, // More connections allowed for direct connection
-      idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-      connectionTimeoutMillis: 10000, // Return an error after 10 seconds if connection cannot be established
-      allowExitOnIdle: true, // Allow pool to close when idle
+      connectionString,
+      ssl: { rejectUnauthorized: false },
+      max: isVercel ? 1 : 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+      allowExitOnIdle: true,
     };
   }
 
@@ -79,29 +81,29 @@ export function getConnectionConfig() {
     };
   } else {
     // Use Transaction Pooler connection string (IPv4 compatible, better for serverless)
-    // Format: postgresql://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres?pgbouncer=true
-    // Port 6543 = Transaction mode (better for serverless, no prepared statements)
-    // Port 5432 = Session mode (requires prepared statements, can have issues with serverless)
+    // Port 6543 = Transaction mode: pooler multiplexes many clients over few DB connections (recommended for Vercel).
+    // Port 5432 = Session mode: one DB connection per client; limited to pool_size → "max clients reached" on serverless.
     const region = process.env.SUPABASE_POOLER_REGION || 'us-west-2';
-    const useTransactionMode = process.env.SUPABASE_USE_TRANSACTION_MODE === 'true';
+    // Default to transaction mode on Vercel to avoid "MaxClientsInSessionMode: max clients reached"
+    const useTransactionMode =
+      process.env.SUPABASE_USE_TRANSACTION_MODE === 'true' ||
+      (isVercel && process.env.SUPABASE_USE_TRANSACTION_MODE !== 'false');
 
     if (useTransactionMode) {
-      // Transaction mode (port 6543) - better for serverless, BUT no prepared statements supported
-      // NOT recommended for 'pg' library
+      // Transaction mode (port 6543) - serverless-optimized; avoids max clients limit
       connectionString = `postgresql://postgres.${PROJECT_REF}:${encodeURIComponent(PASSWORD)}@aws-0-${region}.pooler.supabase.com:6543/postgres?pgbouncer=true`;
-      connectionType = 'Transaction Pooler (IPv4 compatible, serverless-optimized)';
+      connectionType = 'Transaction Pooler (port 6543, serverless-optimized)';
     } else {
-      // Session mode (port 5432) - requires prepared statements (standard for 'pg' library)
+      // Session mode (port 5432) - one connection per client; use only when not on Vercel or when explicitly set
       connectionString = `postgresql://postgres.${PROJECT_REF}:${encodeURIComponent(PASSWORD)}@aws-0-${region}.pooler.supabase.com:5432/postgres`;
-      connectionType = 'Session Pooler (IPv4 compatible)';
+      connectionType = 'Session Pooler (port 5432)';
     }
 
-    // Use same pool configuration for both local and Vercel for consistency
     poolConfig = {
-      max: 1, // Single connection (consistent for both local and serverless)
-      idleTimeoutMillis: 30000, // Keep connection alive longer
-      connectionTimeoutMillis: 15000, // Longer timeout for consistency
-      allowExitOnIdle: false, // Don't close connections on idle
+      max: 1,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 15000,
+      allowExitOnIdle: isVercel, // Release when idle on serverless to reduce connection churn
     };
   }
 
@@ -265,31 +267,22 @@ async function performInitialization() {
 
   // Use pooler connection (either as fallback or primary choice)
   try {
-    // Construct pooler connection config
+    // Construct pooler connection config (same transaction vs session logic as getConnectionConfig)
     const PROJECT_REF = process.env.SUPABASE_PROJECT_REF;
     const PASSWORD = process.env.SUPABASE_DB_PASSWORD;
     const region = process.env.SUPABASE_POOLER_REGION || 'us-west-2';
-    // Default to Session Mode (port 5432) because 'pg' library uses prepared statements
-    // which are not supported in Transaction Mode (port 6543)
-    const useTransactionMode = process.env.SUPABASE_USE_TRANSACTION_MODE === 'true';
+    const isVercelPooler = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
+    const useTransactionMode =
+      process.env.SUPABASE_USE_TRANSACTION_MODE === 'true' ||
+      (isVercelPooler && process.env.SUPABASE_USE_TRANSACTION_MODE !== 'false');
 
     let poolerConnectionString;
     let poolerType;
 
-    // Explicitly log the decision logic if debugging
-    if (process.env.NODE_ENV === 'development' || process.env.SUPABASE_DEBUG === 'true') {
-      if (!useTransactionMode && process.env.SUPABASE_USE_TRANSACTION_MODE !== 'false') {
-        // Logic explains why we defaulted to false
-      }
-    }
-
     if (useTransactionMode) {
-      // Transaction mode (port 6543) - better for serverless generally, BUT incompatible with 'pg' prepared statements
-      // Only use this if you are using a client that doesn't use prepared statements (like postgres.js)
       poolerConnectionString = `postgresql://postgres.${PROJECT_REF}:${encodeURIComponent(PASSWORD)}@aws-0-${region}.pooler.supabase.com:6543/postgres?pgbouncer=true`;
       poolerType = 'Transaction Pooler (Port 6543)';
     } else {
-      // Session mode (port 5432) - REQUIRED for 'pg' library (prepared statements)
       poolerConnectionString = `postgresql://postgres.${PROJECT_REF}:${encodeURIComponent(PASSWORD)}@aws-0-${region}.pooler.supabase.com:5432/postgres`;
       poolerType = 'Session Pooler (Port 5432)';
     }
@@ -304,7 +297,7 @@ async function performInitialization() {
       max: 1,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 15000,
-      allowExitOnIdle: false,
+      allowExitOnIdle: !!isVercelPooler,
     };
 
     pool = new Pool(config);
