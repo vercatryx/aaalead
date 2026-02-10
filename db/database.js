@@ -200,6 +200,8 @@ async function performInitialization() {
     pool = null;
   }
 
+  registerShutdownHandlers();
+
   // Get initial connection config
   let config = getConnectionConfig();
   const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
@@ -453,15 +455,29 @@ async function initializeDatabase() {
   }
 }
 
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  if (pool) {
-    await pool.end();
-  }
-});
+// Graceful shutdown - register only once to avoid MaxListenersExceededWarning
+// when this module is loaded multiple times (e.g. Next.js dev / multiple workers)
+let shutdownHandlersRegistered = false;
 
-process.on('SIGTERM', async () => {
-  if (pool) {
-    await pool.end();
+function registerShutdownHandlers() {
+  if (shutdownHandlersRegistered) return;
+  shutdownHandlersRegistered = true;
+  // Allow more process listeners when this module is loaded multiple times (e.g. Next.js dev)
+  if (process.setMaxListeners) {
+    process.setMaxListeners(Math.max(process.getMaxListeners?.() ?? 10, 20));
   }
-});
+
+  const shutdown = async () => {
+    if (pool) {
+      try {
+        await pool.end();
+      } catch (e) {
+        // ignore
+      }
+      pool = null;
+    }
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
